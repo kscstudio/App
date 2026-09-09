@@ -1,6 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../supabaseClient";
 
+// Aviso simple de errores de guardado, para mostrar un cartel visible en la app
+// en vez de que un fallo quede en silencio (solo en la consola).
+const errorListeners = new Set();
+export function onSaveError(cb) {
+  errorListeners.add(cb);
+  return () => errorListeners.delete(cb);
+}
+function avisarErrorGuardado(mensaje) {
+  errorListeners.forEach((cb) => cb(mensaje));
+}
+
 /**
  * Hook genérico para una tabla de Supabase.
  * Devuelve [filas, persistir, cargando] con la MISMA forma que se usaba
@@ -95,6 +106,7 @@ export function useSupabaseTable(table, { toRow, fromRow, orderBy } = {}) {
         }
       } catch (e) {
         console.error(`Error guardando en ${table}:`, e.message);
+        avisarErrorGuardado(`No se pudo guardar un cambio en "${table}". Revisá tu conexión e intentá de nuevo. (${e.message})`);
       }
     },
     [table]
@@ -148,7 +160,10 @@ export function useContactosSupabase() {
     if (entradas.length === 0) return;
     const filas = entradas.map(([paciente_id, fecha]) => ({ paciente_id, fecha }));
     const { error } = await supabase.from("contactos").upsert(filas);
-    if (error) console.error("Error guardando contacto:", error.message);
+    if (error) {
+      console.error("Error guardando contacto:", error.message);
+      avisarErrorGuardado(`No se pudo guardar el contacto. Revisá tu conexión e intentá de nuevo. (${error.message})`);
+    }
   }, []);
 
   return [mapa, setContactos, ready];
