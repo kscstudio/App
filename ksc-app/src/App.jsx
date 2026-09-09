@@ -10,10 +10,18 @@ import {
   Tooltip, ResponsiveContainer
 } from "recharts";
 import { supabase } from "./supabaseClient";
-import { useSupabaseTable, useContactosSupabase, mapPacientes, mapTurnos, mapCobros, mapPerfiles } from "./lib/supabaseHooks";
+import { useSupabaseTable, useContactosSupabase, onSaveError, mapPacientes, mapTurnos, mapCobros, mapPerfiles } from "./lib/supabaseHooks";
 
 // ---------- Utilidades ----------
-const uid = () => Math.random().toString(36).slice(2, 10);
+// Genera un UUID real (formato que exige la columna "uuid" en Supabase).
+const uid = () => {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (iso) => {
   const [y, m, d] = iso.split("-");
@@ -227,6 +235,15 @@ function PatientPicker({ pacientes, value, onChange, onCreateNew, placeholder })
 export default function KSCStudioApp() {
   const [view, setView] = useState("agenda");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+
+  useEffect(() => {
+    const unsub = onSaveError((mensaje) => {
+      setSaveError(mensaje);
+      setTimeout(() => setSaveError(null), 8000);
+    });
+    return unsub;
+  }, []);
   const [session, setSession] = useState(undefined); // undefined = todavía no se sabe, null = sin sesión
   const [perfil, setPerfil] = useState(null);
   const [perfilLoading, setPerfilLoading] = useState(true);
@@ -325,6 +342,13 @@ export default function KSCStudioApp() {
   return (
     <div className="app-root">
       <FontImports />
+      {saveError && (
+        <div className="save-error-banner">
+          <AlertTriangle size={16} />
+          <span>{saveError}</span>
+          <button onClick={() => setSaveError(null)} aria-label="Cerrar aviso"><X size={15} /></button>
+        </div>
+      )}
       <div className="mobile-topbar">
         <button className="hamburger-btn" onClick={() => setMenuOpen(true)} aria-label="Abrir menú"><Menu size={22} /></button>
         <div className="mobile-topbar-brand">
@@ -545,9 +569,17 @@ const GLOBAL_CSS = `
   input[type=text], input[type=date], input[type=time], input[type=number], input[type=tel], input[type=email], select, textarea{ width:100%; }
   ::placeholder{ color:#B8AC9A; }
 
+  .save-error-banner{
+    position:fixed; top:0; left:0; right:0; z-index:100; background:#B5484B; color:#FDF1F0;
+    display:flex; align-items:center; gap:10px; padding:11px 18px; font-family:'IBM Plex Sans',sans-serif;
+    font-size:13px; font-weight:500; box-shadow:0 2px 10px rgba(0,0,0,0.2);
+  }
+  .save-error-banner span{ flex:1; }
+  .save-error-banner button{ background:none; border:none; color:#FDF1F0; cursor:pointer; display:flex; padding:2px; opacity:0.85; }
+  .save-error-banner button:hover{ opacity:1; }
+
   /* ---------- Mobile ---------- */
-  .mobile-topbar{ display:none; }
-  .hamburger-btn{ background:none; border:none; color:#14100C; padding:6px; display:flex; cursor:pointer; }
+  .mobile-topbar{ display:none; }  .hamburger-btn{ background:none; border:none; color:#14100C; padding:6px; display:flex; cursor:pointer; }
   .sidebar-backdrop{ display:none; }
 
   @media (max-width: 860px) {
