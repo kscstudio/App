@@ -179,6 +179,7 @@ export const mapPacientes = {
     nacimiento: p.nacimiento || null,
     notas: p.notas || "",
     historial: p.historial || [],
+    como_conocio: p.comoConocio || "",
   }),
   fromRow: (r) => ({
     id: r.id,
@@ -188,6 +189,7 @@ export const mapPacientes = {
     nacimiento: r.nacimiento || "",
     notas: r.notas || "",
     historial: r.historial || [],
+    comoConocio: r.como_conocio || "",
   }),
 };
 
