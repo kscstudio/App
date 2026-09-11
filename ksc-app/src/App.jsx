@@ -10,6 +10,7 @@ import {
   Tooltip, ResponsiveContainer
 } from "recharts";
 import { supabase } from "./supabaseClient";
+import * as XLSX from "xlsx";
 import { useSupabaseTable, useContactosSupabase, onSaveError, mapPacientes, mapTurnos, mapCobros, mapPerfiles } from "./lib/supabaseHooks";
 
 // ---------- Utilidades ----------
@@ -59,6 +60,7 @@ function csvEscape(v) {
 
 const PROFESIONALES = ["Santiago Remon", "Franco Tosi", "Franco Gutierrez", "Sebastian Caminio", "Jeremias Aime"];
 const ACTIVIDADES = ["Osteopatía", "Kinefilaxia", "Recovery"];
+const FUENTES_CONTACTO = ["Instagram", "Facebook", "Google", "Recomendación de un paciente", "Recomendación de un profesional", "Pasó por la puerta", "Otro"];
 const MOTIVOS = ["Primera consulta", "Control", "Tratamiento", "Revisión", "Otro"];
 const ESTADOS = ["Pendiente", "Confirmado", "Cancelado", "Atendido"];
 const METODOS_PAGO = ["Efectivo", "Transferencia", "Tarjeta débito", "Tarjeta crédito"];
@@ -863,6 +865,24 @@ function PacientesView({ pacientes, setPacientes, turnos }) {
   const updatePaciente = (id, patch) => setPacientes(pacientes.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   const delPaciente = (id) => setPacientes(pacientes.filter((p) => p.id !== id));
 
+  const descargarExcel = () => {
+    const filas = filtrados.map((p) => ({
+      Nombre: p.nombre,
+      Teléfono: p.telefono || "",
+      Email: p.email || "",
+      "Fecha de nacimiento": p.nacimiento ? fmtDate(p.nacimiento) : "",
+      "Cómo nos conoció": p.comoConocio || "",
+      "Antecedentes / notas": p.notas || "",
+      "Cantidad de turnos": turnos.filter((t) => t.pacienteId === p.id).length,
+      "Historial médico": (p.historial || []).map((h) => `${fmtDate(h.fecha)}: ${h.nota}`).join("  |  "),
+    }));
+    const hoja = XLSX.utils.json_to_sheet(filas);
+    hoja["!cols"] = [{ wch: 24 }, { wch: 16 }, { wch: 22 }, { wch: 16 }, { wch: 22 }, { wch: 30 }, { wch: 14 }, { wch: 50 }];
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, "Pacientes");
+    XLSX.writeFile(libro, `pacientes-KSC-${todayISO()}.xlsx`);
+  };
+
   return (
     <div>
       <div className="page-head">
@@ -870,7 +890,10 @@ function PacientesView({ pacientes, setPacientes, turnos }) {
           <h1>Pacientes</h1>
           <p>Datos personales, contacto e historial clínico.</p>
         </div>
-        <Btn variant="clay" onClick={() => setShowNew(true)}><Plus size={16} /> Nuevo paciente</Btn>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Btn variant="ghost" onClick={descargarExcel}><FileDown size={16} /> Descargar Excel</Btn>
+          <Btn variant="clay" onClick={() => setShowNew(true)}><Plus size={16} /> Nuevo paciente</Btn>
+        </div>
       </div>
 
       <div className="panel" style={{ padding: "12px 16px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10 }}>
@@ -941,6 +964,7 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
   const [email, setEmail] = useState(initial.email || "");
   const [nacimiento, setNacimiento] = useState(initial.nacimiento || "");
   const [notas, setNotas] = useState(initial.notas || "");
+  const [comoConocio, setComoConocio] = useState(initial.comoConocio || "");
 
   return (
     <Modal title={title} onClose={onClose}>
@@ -950,10 +974,16 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
         <div style={{ flex: 1 }}><Field label="Fecha de nacimiento"><input type="date" value={nacimiento} onChange={(e) => setNacimiento(e.target.value)} /></Field></div>
       </div>
       <Field label="Email"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="paciente@mail.com" /></Field>
+      <Field label="¿Cómo nos conoció?">
+        <select value={comoConocio} onChange={(e) => setComoConocio(e.target.value)}>
+          <option value="">Sin especificar</option>
+          {FUENTES_CONTACTO.map((f) => <option key={f}>{f}</option>)}
+        </select>
+      </Field>
       <Field label="Notas / antecedentes"><textarea rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Alergias, observaciones, preferencias…" /></Field>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn variant="primary" onClick={() => nombre.trim() && onSave({ nombre: nombre.trim(), telefono, email, nacimiento, notas })}>Guardar</Btn>
+        <Btn variant="primary" onClick={() => nombre.trim() && onSave({ nombre: nombre.trim(), telefono, email, nacimiento, notas, comoConocio })}>Guardar</Btn>
       </div>
     </Modal>
   );
@@ -990,6 +1020,7 @@ function FichaPacienteModal({ paciente, turnos, onClose, onUpdate, onDelete }) {
         <InfoLine icon={<Phone size={14} />} text={paciente.telefono || "Sin teléfono"} />
         <InfoLine icon={<Mail size={14} />} text={paciente.email || "Sin email"} />
         <InfoLine icon={<Calendar size={14} />} text={paciente.nacimiento ? fmtDate(paciente.nacimiento) : "Sin fecha de nacimiento"} />
+        {paciente.comoConocio && <InfoLine icon={<MessageCircle size={14} />} text={`Nos conoció por: ${paciente.comoConocio}`} />}
       </div>
       {paciente.notas && (
         <div style={{ background: "#F2ECDE", border: "1px solid #E9E1D3", padding: "10px 12px", fontSize: 13.5, marginBottom: 18, borderRadius: 3 }}>
