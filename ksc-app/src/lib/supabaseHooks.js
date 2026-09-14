@@ -180,6 +180,10 @@ export const mapPacientes = {
     notas: p.notas || "",
     historial: p.historial || [],
     como_conocio: p.comoConocio || "",
+    fecha_ingreso: p.fechaIngreso || null,
+    horario: p.horario || "",
+    plan_pago: p.planPago || "",
+    vencimiento_mensualidad: p.vencimientoMensualidad || null,
   }),
   fromRow: (r) => ({
     id: r.id,
@@ -190,6 +194,10 @@ export const mapPacientes = {
     notas: r.notas || "",
     historial: r.historial || [],
     comoConocio: r.como_conocio || "",
+    fechaIngreso: r.fecha_ingreso || "",
+    horario: r.horario || "",
+    planPago: r.plan_pago || "",
+    vencimientoMensualidad: r.vencimiento_mensualidad || "",
   }),
 };
 
@@ -221,17 +229,40 @@ export const mapCobros = {
     id: c.id,
     paciente_id: c.pacienteId,
     concepto: c.concepto || "",
+    tipo_servicio: c.tipoServicio || "",
     monto: c.monto,
     metodo: c.metodo,
     fecha: c.fecha,
+    tipo_pago: c.tipoPago || "Individual",
   }),
   fromRow: (r) => ({
     id: r.id,
     pacienteId: r.paciente_id,
     concepto: r.concepto || "",
+    tipoServicio: r.tipo_servicio || "",
     monto: Number(r.monto),
     metodo: r.metodo,
     fecha: r.fecha,
+    tipoPago: r.tipo_pago || "Individual",
+  }),
+};
+
+export const mapRegistros = {
+  toRow: (r) => ({
+    id: r.id,
+    paciente_id: r.pacienteId,
+    fecha: r.fecha,
+    profesional: r.profesional,
+    tipo: r.tipo || "Individual",
+    notas: r.notas || "",
+  }),
+  fromRow: (row) => ({
+    id: row.id,
+    pacienteId: row.paciente_id,
+    fecha: row.fecha,
+    profesional: row.profesional,
+    tipo: row.tipo || "Individual",
+    notas: row.notas || "",
   }),
 };
 
