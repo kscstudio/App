@@ -913,13 +913,14 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
   const descargarExcel = () => {
     const filas = deLaSemana.map((r) => ({
       Fecha: fmtDate(r.fecha),
+      Hora: r.hora || "",
       Paciente: pacienteById(r.pacienteId)?.nombre || "Paciente eliminado",
       Profesional: r.profesional,
       "Individual o mensualidad": r.tipo,
       Notas: r.notas || "",
     }));
     const hoja = XLSX.utils.json_to_sheet(filas);
-    hoja["!cols"] = [{ wch: 14 }, { wch: 24 }, { wch: 20 }, { wch: 20 }, { wch: 30 }];
+    hoja["!cols"] = [{ wch: 14 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 20 }, { wch: 30 }];
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, "Registro diario");
     XLSX.writeFile(libro, `registro-diario-KSC-${semanaInicio}.xlsx`);
@@ -965,11 +966,12 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
           <div className="empty-state">No hay registros cargados esta semana. Cargá el primero con "Nuevo registro".</div>
         ) : (
           <table>
-            <thead><tr><th>Fecha</th><th>Paciente</th><th>Profesional</th><th>Tipo</th><th>Notas</th><th></th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Hora</th><th>Paciente</th><th>Profesional</th><th>Tipo</th><th>Notas</th><th></th></tr></thead>
             <tbody>
               {deLaSemana.map((r) => (
                 <tr key={r.id}>
                   <td>{fmtDate(r.fecha)}</td>
+                  <td>{r.hora || "—"}</td>
                   <td style={{ fontWeight: 600 }}>{pacienteById(r.pacienteId)?.nombre || "Paciente eliminado"}</td>
                   <td>{r.profesional}</td>
                   <td><Badge tone={r.tipo === "Mensual" ? "clay" : "sage"}>{r.tipo}</Badge></td>
@@ -997,6 +999,7 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
 function NuevoRegistroModal({ pacientes, onCreatePaciente, onClose, onSave }) {
   const [pacienteId, setPacienteId] = useState("");
   const [fecha, setFecha] = useState(todayISO());
+  const [hora, setHora] = useState(() => new Date().toTimeString().slice(0, 5));
   const [profesional, setProfesional] = useState(PROFESIONALES[0]);
   const [tipo, setTipo] = useState(TIPOS_PAGO[0]);
   const [notas, setNotas] = useState("");
@@ -1029,14 +1032,13 @@ function NuevoRegistroModal({ pacientes, onCreatePaciente, onClose, onSave }) {
 
       <div style={{ display: "flex", gap: 12 }}>
         <div style={{ flex: 1 }}><Field label="Fecha"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field></div>
-        <div style={{ flex: 1 }}>
-          <Field label="Profesional">
-            <select value={profesional} onChange={(e) => setProfesional(e.target.value)}>
-              {PROFESIONALES.map((p) => <option key={p}>{p}</option>)}
-            </select>
-          </Field>
-        </div>
+        <div style={{ flex: 1 }}><Field label="Horario"><input type="time" value={hora} onChange={(e) => setHora(e.target.value)} /></Field></div>
       </div>
+      <Field label="Profesional">
+        <select value={profesional} onChange={(e) => setProfesional(e.target.value)}>
+          {PROFESIONALES.map((p) => <option key={p}>{p}</option>)}
+        </select>
+      </Field>
       <Field label="¿Individual o mensualidad?">
         <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
           {TIPOS_PAGO.map((t) => <option key={t}>{t}</option>)}
@@ -1046,7 +1048,7 @@ function NuevoRegistroModal({ pacientes, onCreatePaciente, onClose, onSave }) {
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn variant="primary" onClick={() => pacienteId && onSave({ pacienteId, fecha, profesional, tipo, notas })}>Guardar registro</Btn>
+        <Btn variant="primary" onClick={() => pacienteId && onSave({ pacienteId, fecha, hora, profesional, tipo, notas })}>Guardar registro</Btn>
       </div>
     </Modal>
   );
