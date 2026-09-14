@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Calendar, Users, Wallet, Bell, BarChart3, Plus, X, Phone,
   Mail, Search, ChevronLeft, ChevronRight, CalendarPlus,
@@ -255,9 +255,14 @@ function PatientPicker({ pacientes, value, onChange, onCreateNew, placeholder })
 
 // ---------- App ----------
 export default function KSCStudioApp() {
-  const [view, setView] = useState("agenda");
+  const [view, setView] = useState(() => localStorage.getItem("ksc:lastView") || "agenda");
   const [menuOpen, setMenuOpen] = useState(false);
   const [saveError, setSaveError] = useState(null);
+
+  const cambiarView = (v) => {
+    setView(v);
+    try { localStorage.setItem("ksc:lastView", v); } catch {}
+  };
 
   useEffect(() => {
     const unsub = onSaveError((mensaje) => {
@@ -300,8 +305,17 @@ export default function KSCStudioApp() {
     return () => { activo = false; };
   }, [session]);
 
+  // Solo reiniciamos a "Agenda" si cambió la persona logueada (por ejemplo, otra
+  // cuenta en el mismo dispositivo). Si es la misma persona, respetamos la
+  // última sección donde estaba trabajando.
   useEffect(() => {
-    if (perfil) setView("agenda");
+    if (!perfil) return;
+    let ultimoUsuario = null;
+    try { ultimoUsuario = localStorage.getItem("ksc:lastUserId"); } catch {}
+    if (ultimoUsuario !== perfil.id) {
+      cambiarView("agenda");
+      try { localStorage.setItem("ksc:lastUserId", perfil.id); } catch {}
+    }
   }, [perfil?.id]);
 
   if (session === undefined || (session && perfilLoading)) {
@@ -390,7 +404,7 @@ export default function KSCStudioApp() {
         </div>
         <nav>
           {navVisible.map((n) => (
-            <NavItem key={n.key} icon={<n.icon size={17} />} label={n.label} active={viewPermitida === n.key} onClick={() => { setView(n.key); setMenuOpen(false); }} />
+            <NavItem key={n.key} icon={<n.icon size={17} />} label={n.label} active={viewPermitida === n.key} onClick={() => { cambiarView(n.key); setMenuOpen(false); }} />
           ))}
         </nav>
         <div className="sidebar-user">
@@ -1073,8 +1087,31 @@ function NuevoRegistroModal({ pacientes, onCreatePaciente, onClose, onSave, init
 function PacientesView({ pacientes, setPacientes, turnos }) {
   const [q, setQ] = useState("");
   const [showNew, setShowNew] = useState(false);
-  const [selected, setSelected] = useState(null);
+  const [selected, setSelectedRaw] = useState(null);
   const [toDelete, setToDelete] = useState(null);
+  const restauradoRef = useRef(false);
+
+  // Si la app se reinicia sola (por ejemplo al volver de otra ventana en el
+  // celular), volvemos a abrir la ficha que estabas mirando.
+  useEffect(() => {
+    if (restauradoRef.current || pacientes.length === 0) return;
+    restauradoRef.current = true;
+    try {
+      const id = localStorage.getItem("ksc:pacientes:selectedId");
+      if (id) {
+        const p = pacientes.find((x) => x.id === id);
+        if (p) setSelectedRaw(p);
+      }
+    } catch {}
+  }, [pacientes]);
+
+  const setSelected = (p) => {
+    setSelectedRaw(p);
+    try {
+      if (p) localStorage.setItem("ksc:pacientes:selectedId", p.id);
+      else localStorage.removeItem("ksc:pacientes:selectedId");
+    } catch {}
+  };
 
   const filtrados = pacientes.filter((p) => p.nombre.toLowerCase().includes(q.toLowerCase()));
 
