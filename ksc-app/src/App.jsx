@@ -3,7 +3,7 @@ import {
   Calendar, Users, Wallet, Bell, BarChart3, Plus, X, Phone,
   Mail, Search, ChevronLeft, ChevronRight, CalendarPlus,
   MessageCircle, Check, Trash2, Clock, AlertTriangle, Download, FileDown,
-  LogOut, KeyRound, ShieldCheck, Lock, User as UserIcon, Menu
+  LogOut, KeyRound, ShieldCheck, Lock, User as UserIcon, Menu, ClipboardList
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import { supabase } from "./supabaseClient";
 import * as XLSX from "xlsx";
-import { useSupabaseTable, useContactosSupabase, onSaveError, mapPacientes, mapTurnos, mapCobros, mapPerfiles } from "./lib/supabaseHooks";
+import { useSupabaseTable, useContactosSupabase, onSaveError, mapPacientes, mapTurnos, mapCobros, mapRegistros, mapPerfiles } from "./lib/supabaseHooks";
 
 // ---------- Utilidades ----------
 // Genera un UUID real (formato que exige la columna "uuid" en Supabase).
@@ -35,6 +35,22 @@ const addDays = (iso, n) => {
   d.setDate(d.getDate() + n);
   return d.toISOString().slice(0, 10);
 };
+const addMonths = (iso, n) => {
+  const d = new Date(iso + "T00:00:00");
+  d.setMonth(d.getMonth() + n);
+  return d.toISOString().slice(0, 10);
+};
+const diasEntre = (desdeISO, hastaISO) => {
+  const a = new Date(desdeISO + "T00:00:00");
+  const b = new Date(hastaISO + "T00:00:00");
+  return Math.round((b - a) / 86400000);
+};
+// Estado de la mensualidad de un paciente, a partir de los campos guardados en su ficha.
+function estadoMensualidad(paciente) {
+  if (!paciente || paciente.planPago !== "Mensual" || !paciente.vencimientoMensualidad) return null;
+  const dias = diasEntre(todayISO(), paciente.vencimientoMensualidad);
+  return { vencimiento: paciente.vencimientoMensualidad, dias };
+}
 const mondayOf = (iso) => {
   const d = new Date(iso + "T00:00:00");
   const day = d.getDay();
@@ -58,15 +74,19 @@ function csvEscape(v) {
   return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const PROFESIONALES = ["Santiago Remon", "Franco Tosi", "Franco Gutierrez", "Sebastian Caminio", "Jeremias Aime"];
+const PROFESIONALES = ["Santiago Remon", "Franco Tosi", "Franco Gutierrez", "Sebastian Caminio", "Jeremias Aime", "Juan Pablo"];
 const ACTIVIDADES = ["Osteopatía", "Kinefilaxia", "Recovery"];
-const FUENTES_CONTACTO = ["Instagram", "Facebook", "Google", "Recomendación de un paciente", "Recomendación de un profesional", "Pasó por la puerta", "Otro"];
+const FUENTES_CONTACTO = ["Instagram", "Facebook", "Google", "Recomendación de un paciente", "Recomendación de un profesional", "Derivación de Santiago", "KSC Fitness", "Pasó por la puerta", "Otro"];
+const TIPOS_PAGO = ["Individual", "Mensual"];
+const TIPOS_SERVICIO = ["Entrenamiento/Readaptación", "Rehabilitaciones", "Sesión personal de kinesiología", "Terapia manual", "Otro"];
+const HORARIOS_ASISTENCIA = ["Mañana", "Mediodía", "Tarde"];
 const MOTIVOS = ["Primera consulta", "Control", "Tratamiento", "Revisión", "Otro"];
 const ESTADOS = ["Pendiente", "Confirmado", "Cancelado", "Atendido"];
 const METODOS_PAGO = ["Efectivo", "Transferencia", "Tarjeta débito", "Tarjeta crédito"];
 
 const NAV_ITEMS = [
   { key: "agenda", label: "Agenda", icon: Calendar, roles: ["admin", "staff"] },
+  { key: "registro", label: "Registro diario", icon: ClipboardList, roles: ["admin", "staff"] },
   { key: "pacientes", label: "Pacientes", icon: Users, roles: ["admin", "staff"] },
   { key: "cobros", label: "Cobros", icon: Wallet, roles: ["admin"] },
   { key: "seguimiento", label: "Seguimiento", icon: Bell, roles: ["admin", "staff"] },
@@ -253,6 +273,7 @@ export default function KSCStudioApp() {
   const [pacientes, setPacientes] = useSupabaseTable("pacientes", mapPacientes);
   const [turnos, setTurnos] = useSupabaseTable("turnos", mapTurnos);
   const [cobros, setCobros] = useSupabaseTable("cobros", mapCobros);
+  const [registros, setRegistros] = useSupabaseTable("registros_diarios", mapRegistros);
   const [contactos, setContactos] = useContactosSupabase();
   const [perfiles, setPerfiles] = useSupabaseTable("perfiles", mapPerfiles);
 
@@ -381,6 +402,7 @@ export default function KSCStudioApp() {
 
       <main className="content">
         {viewPermitida === "agenda" && <AgendaView turnos={turnos} setTurnos={setTurnos} pacientes={pacientes} setPacientes={setPacientes} pacienteById={pacienteById} />}
+        {viewPermitida === "registro" && <RegistroDiarioView registros={registros} setRegistros={setRegistros} pacientes={pacientes} setPacientes={setPacientes} />}
         {viewPermitida === "pacientes" && <PacientesView pacientes={pacientes} setPacientes={setPacientes} turnos={turnos} />}
         {viewPermitida === "cobros" && <CobrosView cobros={cobros} setCobros={setCobros} pacientes={pacientes} setPacientes={setPacientes} turnos={turnos} />}
         {viewPermitida === "seguimiento" && <SeguimientoView pacientes={pacientes} turnos={turnos} contactos={contactos} setContactos={setContactos} />}
@@ -853,6 +875,183 @@ function ConfirmModal({ title, message, confirmLabel = "Eliminar", onConfirm, on
   );
 }
 
+// ================= REGISTRO DIARIO =================
+function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }) {
+  const [semanaInicio, setSemanaInicio] = useState(mondayOf(todayISO()));
+  const [showNew, setShowNew] = useState(false);
+  const semanaFin = addDays(semanaInicio, 6);
+
+  const pacienteById = (id) => pacientes.find((p) => p.id === id);
+
+  const deLaSemana = useMemo(
+    () => registros.filter((r) => r.fecha >= semanaInicio && r.fecha <= semanaFin).sort((a, b) => b.fecha.localeCompare(a.fecha)),
+    [registros, semanaInicio, semanaFin]
+  );
+
+  const porPaciente = useMemo(() => {
+    const map = {};
+    deLaSemana.forEach((r) => {
+      map[r.pacienteId] = (map[r.pacienteId] || 0) + 1;
+    });
+    return Object.entries(map)
+      .map(([pacienteId, cantidad]) => ({ pacienteId, cantidad, nombre: pacienteById(pacienteId)?.nombre || "Paciente eliminado" }))
+      .sort((a, b) => b.cantidad - a.cantidad);
+  }, [deLaSemana, pacientes]);
+
+  const crearPacienteRapido = (nombre) => {
+    if (!nombre) return null;
+    const nuevo = { id: uid(), nombre, telefono: "", email: "", nacimiento: "", notas: "", historial: [] };
+    setPacientes([...pacientes, nuevo]);
+    return nuevo;
+  };
+
+  const addRegistro = (r) => setRegistros([...registros, { id: uid(), ...r }]);
+  const delRegistro = (id) => setRegistros(registros.filter((r) => r.id !== id));
+
+  const cambiarSemana = (delta) => setSemanaInicio(addDays(semanaInicio, delta * 7));
+
+  const descargarExcel = () => {
+    const filas = deLaSemana.map((r) => ({
+      Fecha: fmtDate(r.fecha),
+      Paciente: pacienteById(r.pacienteId)?.nombre || "Paciente eliminado",
+      Profesional: r.profesional,
+      "Individual o mensualidad": r.tipo,
+      Notas: r.notas || "",
+    }));
+    const hoja = XLSX.utils.json_to_sheet(filas);
+    hoja["!cols"] = [{ wch: 14 }, { wch: 24 }, { wch: 20 }, { wch: 20 }, { wch: 30 }];
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, "Registro diario");
+    XLSX.writeFile(libro, `registro-diario-KSC-${semanaInicio}.xlsx`);
+  };
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <h1>Registro diario</h1>
+          <p>Anotá cada persona que entra al consultorio, haya tenido turno agendado o no.</p>
+        </div>
+        <Btn variant="clay" onClick={() => setShowNew(true)}><Plus size={16} /> Nuevo registro</Btn>
+      </div>
+
+      <div className="panel" style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
+        <button className="icon-btn" onClick={() => cambiarSemana(-1)}><ChevronLeft size={20} /></button>
+        <input type="date" value={semanaInicio} onChange={(e) => setSemanaInicio(mondayOf(e.target.value))} style={{ border: "1px solid #D6CBB8", padding: "7px 10px", borderRadius: 3, fontFamily: "'IBM Plex Sans',sans-serif" }} />
+        <button className="icon-btn" onClick={() => cambiarSemana(1)}><ChevronRight size={20} /></button>
+        <span style={{ fontFamily: "'Fraunces',serif", fontSize: 16 }}>Semana del {fmtDate(semanaInicio)} al {fmtDate(semanaFin)}</span>
+        <button onClick={() => setSemanaInicio(mondayOf(todayISO()))} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Esta semana</button>
+        <div style={{ marginLeft: "auto" }}>
+          <Btn variant="ghost" small onClick={descargarExcel}><FileDown size={13} /> Descargar Excel</Btn>
+        </div>
+      </div>
+
+      <div className="panel" style={{ padding: 20, marginBottom: 18 }}>
+        <h4 className="chart-title">Quién vino esta semana y cuántas veces</h4>
+        {porPaciente.length === 0 ? <p className="muted-text">Todavía no hay registros esta semana.</p> : (
+          <table>
+            <thead><tr><th>Paciente</th><th>Veces esta semana</th></tr></thead>
+            <tbody>
+              {porPaciente.map((r) => (
+                <tr key={r.pacienteId}><td style={{ fontWeight: 600 }}>{r.nombre}</td><td>{r.cantidad}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel">
+        {deLaSemana.length === 0 ? (
+          <div className="empty-state">No hay registros cargados esta semana. Cargá el primero con "Nuevo registro".</div>
+        ) : (
+          <table>
+            <thead><tr><th>Fecha</th><th>Paciente</th><th>Profesional</th><th>Tipo</th><th>Notas</th><th></th></tr></thead>
+            <tbody>
+              {deLaSemana.map((r) => (
+                <tr key={r.id}>
+                  <td>{fmtDate(r.fecha)}</td>
+                  <td style={{ fontWeight: 600 }}>{pacienteById(r.pacienteId)?.nombre || "Paciente eliminado"}</td>
+                  <td>{r.profesional}</td>
+                  <td><Badge tone={r.tipo === "Mensual" ? "clay" : "sage"}>{r.tipo}</Badge></td>
+                  <td>{r.notas || "—"}</td>
+                  <td><button className="icon-btn" onClick={() => delRegistro(r.id)}><Trash2 size={15} /></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {showNew && (
+        <NuevoRegistroModal
+          pacientes={pacientes}
+          onCreatePaciente={crearPacienteRapido}
+          onClose={() => setShowNew(false)}
+          onSave={(r) => { addRegistro(r); setShowNew(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function NuevoRegistroModal({ pacientes, onCreatePaciente, onClose, onSave }) {
+  const [pacienteId, setPacienteId] = useState("");
+  const [fecha, setFecha] = useState(todayISO());
+  const [profesional, setProfesional] = useState(PROFESIONALES[0]);
+  const [tipo, setTipo] = useState(TIPOS_PAGO[0]);
+  const [notas, setNotas] = useState("");
+
+  const pacienteSeleccionado = pacientes.find((p) => p.id === pacienteId);
+  const mensualidad = estadoMensualidad(pacienteSeleccionado);
+
+  return (
+    <Modal title="Nuevo registro de ingreso" onClose={onClose}>
+      <Field label="Paciente">
+        <PatientPicker pacientes={pacientes} value={pacienteId} onChange={setPacienteId} onCreateNew={onCreatePaciente} />
+      </Field>
+
+      {mensualidad && (
+        <div style={{
+          background: mensualidad.dias < 0 ? "#F3D9D6" : mensualidad.dias <= 5 ? "#F1DDC9" : "#EDE6D8",
+          color: mensualidad.dias < 0 ? "#8C2F32" : "#5C5245",
+          padding: "10px 12px", fontSize: 13, marginBottom: 14, borderRadius: 3, display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+          <span>
+            {mensualidad.dias < 0
+              ? `Ojo: la mensualidad de ${pacienteSeleccionado.nombre} venció hace ${Math.abs(mensualidad.dias)} día(s) (el ${fmtDate(mensualidad.vencimiento)}).`
+              : mensualidad.dias <= 5
+              ? `La mensualidad de ${pacienteSeleccionado.nombre} vence en ${mensualidad.dias} día(s), el ${fmtDate(mensualidad.vencimiento)}. Aprovechá para avisarle.`
+              : `Mensualidad vigente hasta el ${fmtDate(mensualidad.vencimiento)}.`}
+          </span>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ flex: 1 }}><Field label="Fecha"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field></div>
+        <div style={{ flex: 1 }}>
+          <Field label="Profesional">
+            <select value={profesional} onChange={(e) => setProfesional(e.target.value)}>
+              {PROFESIONALES.map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </Field>
+        </div>
+      </div>
+      <Field label="¿Individual o mensualidad?">
+        <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
+          {TIPOS_PAGO.map((t) => <option key={t}>{t}</option>)}
+        </select>
+      </Field>
+      <Field label="Notas (opcional)"><input type="text" value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Alguna observación del día…" /></Field>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="primary" onClick={() => pacienteId && onSave({ pacienteId, fecha, profesional, tipo, notas })}>Guardar registro</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function PacientesView({ pacientes, setPacientes, turnos }) {
   const [q, setQ] = useState("");
   const [showNew, setShowNew] = useState(false);
@@ -871,13 +1070,17 @@ function PacientesView({ pacientes, setPacientes, turnos }) {
       Teléfono: p.telefono || "",
       Email: p.email || "",
       "Fecha de nacimiento": p.nacimiento ? fmtDate(p.nacimiento) : "",
+      "Fecha de ingreso al tratamiento": p.fechaIngreso ? fmtDate(p.fechaIngreso) : "",
+      "Horario en el que asiste": p.horario || "",
       "Cómo nos conoció": p.comoConocio || "",
+      "Plan de pago": p.planPago || "",
+      "Vencimiento mensualidad": p.vencimientoMensualidad ? fmtDate(p.vencimientoMensualidad) : "",
       "Antecedentes / notas": p.notas || "",
       "Cantidad de turnos": turnos.filter((t) => t.pacienteId === p.id).length,
       "Historial médico": (p.historial || []).map((h) => `${fmtDate(h.fecha)}: ${h.nota}`).join("  |  "),
     }));
     const hoja = XLSX.utils.json_to_sheet(filas);
-    hoja["!cols"] = [{ wch: 24 }, { wch: 16 }, { wch: 22 }, { wch: 16 }, { wch: 22 }, { wch: 30 }, { wch: 14 }, { wch: 50 }];
+    hoja["!cols"] = [{ wch: 24 }, { wch: 16 }, { wch: 22 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 30 }, { wch: 14 }, { wch: 50 }];
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, "Pacientes");
     XLSX.writeFile(libro, `pacientes-KSC-${todayISO()}.xlsx`);
@@ -965,6 +1168,8 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
   const [nacimiento, setNacimiento] = useState(initial.nacimiento || "");
   const [notas, setNotas] = useState(initial.notas || "");
   const [comoConocio, setComoConocio] = useState(initial.comoConocio || "");
+  const [fechaIngreso, setFechaIngreso] = useState(initial.fechaIngreso || "");
+  const [horario, setHorario] = useState(initial.horario || "");
 
   return (
     <Modal title={title} onClose={onClose}>
@@ -974,6 +1179,17 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
         <div style={{ flex: 1 }}><Field label="Fecha de nacimiento"><input type="date" value={nacimiento} onChange={(e) => setNacimiento(e.target.value)} /></Field></div>
       </div>
       <Field label="Email"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="paciente@mail.com" /></Field>
+      <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ flex: 1 }}><Field label="Fecha de ingreso al tratamiento"><input type="date" value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} /></Field></div>
+        <div style={{ flex: 1 }}>
+          <Field label="Horario en el que asiste">
+            <select value={horario} onChange={(e) => setHorario(e.target.value)}>
+              <option value="">Sin especificar</option>
+              {HORARIOS_ASISTENCIA.map((h) => <option key={h}>{h}</option>)}
+            </select>
+          </Field>
+        </div>
+      </div>
       <Field label="¿Cómo nos conoció?">
         <select value={comoConocio} onChange={(e) => setComoConocio(e.target.value)}>
           <option value="">Sin especificar</option>
@@ -983,7 +1199,7 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
       <Field label="Notas / antecedentes"><textarea rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Alergias, observaciones, preferencias…" /></Field>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn variant="primary" onClick={() => nombre.trim() && onSave({ nombre: nombre.trim(), telefono, email, nacimiento, notas, comoConocio })}>Guardar</Btn>
+        <Btn variant="primary" onClick={() => nombre.trim() && onSave({ nombre: nombre.trim(), telefono, email, nacimiento, notas, comoConocio, fechaIngreso, horario })}>Guardar</Btn>
       </div>
     </Modal>
   );
@@ -1021,7 +1237,20 @@ function FichaPacienteModal({ paciente, turnos, onClose, onUpdate, onDelete }) {
         <InfoLine icon={<Mail size={14} />} text={paciente.email || "Sin email"} />
         <InfoLine icon={<Calendar size={14} />} text={paciente.nacimiento ? fmtDate(paciente.nacimiento) : "Sin fecha de nacimiento"} />
         {paciente.comoConocio && <InfoLine icon={<MessageCircle size={14} />} text={`Nos conoció por: ${paciente.comoConocio}`} />}
+        {paciente.fechaIngreso && <InfoLine icon={<Calendar size={14} />} text={`Ingresó el ${fmtDate(paciente.fechaIngreso)}`} />}
+        {paciente.horario && <InfoLine icon={<Clock size={14} />} text={`Asiste de ${paciente.horario.toLowerCase()}`} />}
       </div>
+      {estadoMensualidad(paciente) && (
+        <div style={{
+          background: estadoMensualidad(paciente).dias < 0 ? "#F3D9D6" : estadoMensualidad(paciente).dias <= 5 ? "#F1DDC9" : "#EDE6D8",
+          color: estadoMensualidad(paciente).dias < 0 ? "#8C2F32" : "#5C5245",
+          padding: "10px 12px", fontSize: 13.5, marginBottom: 18, borderRadius: 3,
+        }}>
+          {estadoMensualidad(paciente).dias < 0
+            ? `Mensualidad vencida hace ${Math.abs(estadoMensualidad(paciente).dias)} día(s) (vencía el ${fmtDate(estadoMensualidad(paciente).vencimiento)})`
+            : `Mensualidad vigente, vence el ${fmtDate(estadoMensualidad(paciente).vencimiento)} (en ${estadoMensualidad(paciente).dias} día(s))`}
+        </div>
+      )}
       {paciente.notas && (
         <div style={{ background: "#F2ECDE", border: "1px solid #E9E1D3", padding: "10px 12px", fontSize: 13.5, marginBottom: 18, borderRadius: 3 }}>
           <strong>Antecedentes: </strong>{paciente.notas}
@@ -1091,7 +1320,15 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
 
   const delMes = cobros.filter((c) => c.fecha.slice(0, 7) === mesFiltro).sort((a, b) => b.fecha.localeCompare(a.fecha));
   const totalMes = delMes.reduce((acc, c) => acc + Number(c.monto || 0), 0);
-  const addCobro = (c) => setCobros([...cobros, { id: uid(), ...c }]);
+  const addCobro = (c) => {
+    setCobros([...cobros, { id: uid(), ...c }]);
+    if (c.tipoPago === "Mensual") {
+      const vencimiento = addMonths(c.fecha, 1);
+      setPacientes(pacientes.map((p) => (p.id === c.pacienteId ? { ...p, planPago: "Mensual", vencimientoMensualidad: vencimiento } : p)));
+    } else if (c.tipoPago === "Individual") {
+      setPacientes(pacientes.map((p) => (p.id === c.pacienteId ? { ...p, planPago: "Individual" } : p)));
+    }
+  };
   const delCobro = (id) => setCobros(cobros.filter((c) => c.id !== id));
   const crearPacienteRapido = (nombre) => {
     if (!nombre) return null;
@@ -1113,6 +1350,7 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
       <div className="tab-switch">
         <button className={"tab-btn" + (tab === "mes" ? " active" : "")} onClick={() => setTab("mes")}>Cobros del mes</button>
         <button className={"tab-btn" + (tab === "semana" ? " active" : "")} onClick={() => setTab("semana")}>Reporte semanal</button>
+        <button className={"tab-btn" + (tab === "vencimientos" ? " active" : "")} onClick={() => setTab("vencimientos")}>Vencimientos</button>
       </div>
 
       {tab === "mes" ? (
@@ -1130,7 +1368,7 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
               <div className="empty-state">No hay cobros registrados en este mes.</div>
             ) : (
               <table>
-                <thead><tr><th>Fecha</th><th>Paciente</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Paciente</th><th>Tipo de servicio</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th></tr></thead>
                 <tbody>
                   {delMes.map((c) => {
                     const pac = pacientes.find((p) => p.id === c.pacienteId);
@@ -1138,6 +1376,7 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
                       <tr key={c.id}>
                         <td>{fmtDate(c.fecha)}</td>
                         <td>{pac ? pac.nombre : "—"}</td>
+                        <td>{c.tipoServicio ? <Badge tone="clay">{c.tipoServicio}</Badge> : "—"}</td>
                         <td>{c.concepto}</td>
                         <td><Badge tone="sage">{c.metodo}</Badge></td>
                         <td style={{ fontWeight: 600 }}>{fmtMoney(c.monto)}</td>
@@ -1150,8 +1389,10 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
             )}
           </div>
         </>
-      ) : (
+      ) : tab === "semana" ? (
         <ReporteSemanalView cobros={cobros} turnos={turnos} pacientes={pacientes} />
+      ) : (
+        <VencimientosView pacientes={pacientes} />
       )}
 
       {showNew && (
@@ -1161,6 +1402,63 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
       )}
     </div>
   );
+}
+
+function VencimientosView({ pacientes }) {
+  const [waPaciente, setWaPaciente] = useState(null);
+
+  const conMensualidad = pacientes
+    .filter((p) => p.planPago === "Mensual" && p.vencimientoMensualidad)
+    .map((p) => ({ ...p, dias: diasEntre(todayISO(), p.vencimientoMensualidad) }))
+    .sort((a, b) => a.dias - b.dias);
+
+  return (
+    <div>
+      <div className="panel">
+        {conMensualidad.length === 0 ? (
+          <div className="empty-state">Ningún paciente con mensualidad cargada todavía. Se completa solo cuando registrás un cobro tipo "Mensual".</div>
+        ) : (
+          <table>
+            <thead><tr><th>Paciente</th><th>Vencimiento</th><th>Estado</th><th></th></tr></thead>
+            <tbody>
+              {conMensualidad.map((p) => (
+                <tr key={p.id}>
+                  <td style={{ fontWeight: 600 }}>{p.nombre}</td>
+                  <td>{fmtDate(p.vencimientoMensualidad)}</td>
+                  <td>
+                    {p.dias < 0
+                      ? <Badge tone="coral">Vencida hace {Math.abs(p.dias)} día(s)</Badge>
+                      : p.dias <= 5
+                      ? <Badge tone="clay">Vence en {p.dias} día(s)</Badge>
+                      : <Badge tone="sage">Vigente ({p.dias} días)</Badge>}
+                  </td>
+                  <td>
+                    {p.telefono
+                      ? <Btn variant="clay" small onClick={() => setWaPaciente(p)}><MessageCircle size={13} /> WhatsApp</Btn>
+                      : <span className="muted-text" style={{ fontSize: 12.5 }}>Sin teléfono</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {waPaciente && (
+        <WhatsAppModal
+          nombre={waPaciente.nombre}
+          telefono={waPaciente.telefono}
+          mensaje={waVencimiento(waPaciente.nombre, waPaciente.vencimientoMensualidad, waPaciente.dias)}
+          onClose={() => setWaPaciente(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function waVencimiento(nombre, vencimiento, dias) {
+  const primerNombre = nombre.split(" ")[0];
+  if (dias < 0) return `Hola ${primerNombre}! Te contactamos de KSC Studio porque tu mensualidad venció el ${fmtDate(vencimiento)}. ¿Coordinamos la renovación?`;
+  return `Hola ${primerNombre}! Te recordamos desde KSC Studio que tu mensualidad vence el ${fmtDate(vencimiento)}. ¡Te esperamos para renovarla!`;
 }
 
 function ReporteSemanalView({ cobros, turnos, pacientes }) {
@@ -1370,28 +1668,51 @@ function ReporteSemanalView({ cobros, turnos, pacientes }) {
 function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
   const [pacienteId, setPacienteId] = useState("");
   const [concepto, setConcepto] = useState("Consulta");
+  const [tipoServicio, setTipoServicio] = useState(TIPOS_SERVICIO[0]);
   const [monto, setMonto] = useState("");
   const [metodo, setMetodo] = useState(METODOS_PAGO[0]);
   const [fecha, setFecha] = useState(todayISO());
+  const [tipoPago, setTipoPago] = useState(TIPOS_PAGO[0]);
 
   return (
     <>
       <Field label="Paciente">
         <PatientPicker pacientes={pacientes} value={pacienteId} onChange={setPacienteId} onCreateNew={onCreatePaciente} />
       </Field>
+      <Field label="Tipo de servicio">
+        <select value={tipoServicio} onChange={(e) => setTipoServicio(e.target.value)}>
+          {TIPOS_SERVICIO.map((s) => <option key={s}>{s}</option>)}
+        </select>
+      </Field>
       <Field label="Concepto"><input type="text" value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
       <div style={{ display: "flex", gap: 12 }}>
         <div style={{ flex: 1 }}><Field label="Monto (ARS)"><input type="number" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0" /></Field></div>
         <div style={{ flex: 1 }}><Field label="Fecha"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field></div>
       </div>
-      <Field label="Método de pago">
-        <select value={metodo} onChange={(e) => setMetodo(e.target.value)}>
-          {METODOS_PAGO.map((m) => <option key={m}>{m}</option>)}
-        </select>
-      </Field>
+      <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <Field label="Método de pago">
+            <select value={metodo} onChange={(e) => setMetodo(e.target.value)}>
+              {METODOS_PAGO.map((m) => <option key={m}>{m}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div style={{ flex: 1 }}>
+          <Field label="¿Individual o mensualidad?">
+            <select value={tipoPago} onChange={(e) => setTipoPago(e.target.value)}>
+              {TIPOS_PAGO.map((t) => <option key={t}>{t}</option>)}
+            </select>
+          </Field>
+        </div>
+      </div>
+      {tipoPago === "Mensual" && (
+        <p style={{ fontSize: 12.5, color: "#7C7264", margin: "-8px 0 14px", lineHeight: 1.5 }}>
+          Al guardar, la ficha del paciente va a mostrar que su mensualidad vence el {fmtDate(addMonths(fecha, 1))}, y todo el equipo va a ver ese aviso al registrar su ingreso.
+        </p>
+      )}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn variant="primary" onClick={() => monto && pacienteId && onSave({ pacienteId, concepto, monto: Number(monto), metodo, fecha })}>Guardar cobro</Btn>
+        <Btn variant="primary" onClick={() => monto && pacienteId && onSave({ pacienteId, concepto, tipoServicio, monto: Number(monto), metodo, fecha, tipoPago })}>Guardar cobro</Btn>
       </div>
     </>
   );
