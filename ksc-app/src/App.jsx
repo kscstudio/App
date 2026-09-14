@@ -3,7 +3,7 @@ import {
   Calendar, Users, Wallet, Bell, BarChart3, Plus, X, Phone,
   Mail, Search, ChevronLeft, ChevronRight, CalendarPlus,
   MessageCircle, Check, Trash2, Clock, AlertTriangle, Download, FileDown,
-  LogOut, KeyRound, ShieldCheck, Lock, User as UserIcon, Menu, ClipboardList
+  LogOut, KeyRound, ShieldCheck, Lock, User as UserIcon, Menu, ClipboardList, Pencil
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -879,6 +879,7 @@ function ConfirmModal({ title, message, confirmLabel = "Eliminar", onConfirm, on
 function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }) {
   const [semanaInicio, setSemanaInicio] = useState(mondayOf(todayISO()));
   const [showNew, setShowNew] = useState(false);
+  const [editando, setEditando] = useState(null);
   const semanaFin = addDays(semanaInicio, 6);
 
   const pacienteById = (id) => pacientes.find((p) => p.id === id);
@@ -906,6 +907,7 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
   };
 
   const addRegistro = (r) => setRegistros([...registros, { id: uid(), ...r }]);
+  const updateRegistro = (id, patch) => setRegistros(registros.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const delRegistro = (id) => setRegistros(registros.filter((r) => r.id !== id));
 
   const cambiarSemana = (delta) => setSemanaInicio(addDays(semanaInicio, delta * 7));
@@ -976,7 +978,12 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
                   <td>{r.profesional}</td>
                   <td><Badge tone={r.tipo === "Mensual" ? "clay" : "sage"}>{r.tipo}</Badge></td>
                   <td>{r.notas || "—"}</td>
-                  <td><button className="icon-btn" onClick={() => delRegistro(r.id)}><Trash2 size={15} /></button></td>
+                  <td>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="icon-btn" title="Editar" onClick={() => setEditando(r)}><Pencil size={15} /></button>
+                      <button className="icon-btn" title="Eliminar" onClick={() => delRegistro(r.id)}><Trash2 size={15} /></button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -992,23 +999,32 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
           onSave={(r) => { addRegistro(r); setShowNew(false); }}
         />
       )}
+      {editando && (
+        <NuevoRegistroModal
+          pacientes={pacientes}
+          onCreatePaciente={crearPacienteRapido}
+          initial={editando}
+          onClose={() => setEditando(null)}
+          onSave={(r) => { updateRegistro(editando.id, r); setEditando(null); }}
+        />
+      )}
     </div>
   );
 }
 
-function NuevoRegistroModal({ pacientes, onCreatePaciente, onClose, onSave }) {
-  const [pacienteId, setPacienteId] = useState("");
-  const [fecha, setFecha] = useState(todayISO());
-  const [hora, setHora] = useState(() => new Date().toTimeString().slice(0, 5));
-  const [profesional, setProfesional] = useState(PROFESIONALES[0]);
-  const [tipo, setTipo] = useState(TIPOS_PAGO[0]);
-  const [notas, setNotas] = useState("");
+function NuevoRegistroModal({ pacientes, onCreatePaciente, onClose, onSave, initial = null }) {
+  const [pacienteId, setPacienteId] = useState(initial?.pacienteId || "");
+  const [fecha, setFecha] = useState(initial?.fecha || todayISO());
+  const [hora, setHora] = useState(initial?.hora || (() => new Date().toTimeString().slice(0, 5))());
+  const [profesional, setProfesional] = useState(initial?.profesional || PROFESIONALES[0]);
+  const [tipo, setTipo] = useState(initial?.tipo || TIPOS_PAGO[0]);
+  const [notas, setNotas] = useState(initial?.notas || "");
 
   const pacienteSeleccionado = pacientes.find((p) => p.id === pacienteId);
   const mensualidad = estadoMensualidad(pacienteSeleccionado);
 
   return (
-    <Modal title="Nuevo registro de ingreso" onClose={onClose}>
+    <Modal title={initial ? "Editar registro" : "Nuevo registro de ingreso"} onClose={onClose}>
       <Field label="Paciente">
         <PatientPicker pacientes={pacientes} value={pacienteId} onChange={setPacienteId} onCreateNew={onCreatePaciente} />
       </Field>
@@ -1048,7 +1064,7 @@ function NuevoRegistroModal({ pacientes, onCreatePaciente, onClose, onSave }) {
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn variant="primary" onClick={() => pacienteId && onSave({ pacienteId, fecha, hora, profesional, tipo, notas })}>Guardar registro</Btn>
+        <Btn variant="primary" onClick={() => pacienteId && onSave({ pacienteId, fecha, hora, profesional, tipo, notas })}>{initial ? "Guardar cambios" : "Guardar registro"}</Btn>
       </div>
     </Modal>
   );
