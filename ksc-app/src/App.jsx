@@ -950,32 +950,46 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
 }
 
 function RegistroTabla({ filas, pacienteById, onEditar, onEliminar, vacioTexto }) {
+  const [expandido, setExpandido] = useState(false);
+  const LIMITE = 8;
+  const visibles = expandido ? filas : filas.slice(0, LIMITE);
+  const hayMas = filas.length > LIMITE;
+
   return (
     <div className="panel">
       {filas.length === 0 ? (
         <div className="empty-state">{vacioTexto}</div>
       ) : (
-        <table>
-          <thead><tr><th>Fecha</th><th>Hora</th><th>Paciente</th><th>Profesional</th><th>Tipo</th><th>Notas</th><th></th></tr></thead>
-          <tbody>
-            {filas.map((r) => (
-              <tr key={r.id}>
-                <td>{fmtDate(r.fecha)}</td>
-                <td>{r.hora || "—"}</td>
-                <td style={{ fontWeight: 600 }}>{pacienteById(r.pacienteId)?.nombre || "Paciente eliminado"}</td>
-                <td>{r.profesional}</td>
-                <td><Badge tone={r.tipo === "Mensual" ? "clay" : "sage"}>{r.tipo}</Badge></td>
-                <td>{r.notas || "—"}</td>
-                <td>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button className="icon-btn" title="Editar" onClick={() => onEditar(r)}><Pencil size={15} /></button>
-                    <button className="icon-btn" title="Eliminar" onClick={() => onEliminar(r.id)}><Trash2 size={15} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          <table>
+            <thead><tr><th>Fecha</th><th>Hora</th><th>Paciente</th><th>Profesional</th><th>Tipo</th><th>Notas</th><th></th></tr></thead>
+            <tbody>
+              {visibles.map((r) => (
+                <tr key={r.id}>
+                  <td>{fmtDate(r.fecha)}</td>
+                  <td>{r.hora || "—"}</td>
+                  <td style={{ fontWeight: 600 }}>{pacienteById(r.pacienteId)?.nombre || "Paciente eliminado"}</td>
+                  <td>{r.profesional}</td>
+                  <td><Badge tone={r.tipo === "Mensual" ? "clay" : "sage"}>{r.tipo}</Badge></td>
+                  <td>{r.notas || "—"}</td>
+                  <td>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="icon-btn" title="Editar" onClick={() => onEditar(r)}><Pencil size={15} /></button>
+                      <button className="icon-btn" title="Eliminar" onClick={() => onEliminar(r.id)}><Trash2 size={15} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {hayMas && (
+            <div style={{ padding: "12px 14px" }}>
+              <button onClick={() => setExpandido(!expandido)} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13, padding: 0 }}>
+                {expandido ? "Ver menos" : `Ver los ${filas.length} registros`}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
