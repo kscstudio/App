@@ -913,9 +913,8 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
       .sort((a, b) => b.cantidad - a.cantidad);
   }, [deLaSemana, pacientes]);
 
-  const crearPacienteRapido = (nombre) => {
-    if (!nombre) return null;
-    const nuevo = { id: uid(), nombre, telefono: "", email: "", nacimiento: "", notas: "", historial: [] };
+  const crearPacienteCompleto = (datos) => {
+    const nuevo = { id: uid(), historial: [], ...datos };
     setPacientes([...pacientes, nuevo]);
     return nuevo;
   };
@@ -1008,7 +1007,7 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
       {showNew && (
         <NuevoRegistroModal
           pacientes={pacientes}
-          onCreatePaciente={crearPacienteRapido}
+          onCreatePacienteCompleto={crearPacienteCompleto}
           onClose={() => setShowNew(false)}
           onSave={(r) => { addRegistro(r); setShowNew(false); }}
         />
@@ -1016,7 +1015,7 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
       {editando && (
         <NuevoRegistroModal
           pacientes={pacientes}
-          onCreatePaciente={crearPacienteRapido}
+          onCreatePacienteCompleto={crearPacienteCompleto}
           initial={editando}
           onClose={() => setEditando(null)}
           onSave={(r) => { updateRegistro(editando.id, r); setEditando(null); }}
@@ -1026,21 +1025,23 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
   );
 }
 
-function NuevoRegistroModal({ pacientes, onCreatePaciente, onClose, onSave, initial = null }) {
+function NuevoRegistroModal({ pacientes, onCreatePacienteCompleto, onClose, onSave, initial = null }) {
   const [pacienteId, setPacienteId] = useState(initial?.pacienteId || "");
   const [fecha, setFecha] = useState(initial?.fecha || todayISO());
   const [hora, setHora] = useState(initial?.hora || (() => new Date().toTimeString().slice(0, 5))());
   const [profesional, setProfesional] = useState(initial?.profesional || PROFESIONALES[0]);
   const [tipo, setTipo] = useState(initial?.tipo || TIPOS_PAGO[0]);
   const [notas, setNotas] = useState(initial?.notas || "");
+  const [creandoNombre, setCreandoNombre] = useState(null);
 
   const pacienteSeleccionado = pacientes.find((p) => p.id === pacienteId);
   const mensualidad = estadoMensualidad(pacienteSeleccionado);
 
   return (
+    <>
     <Modal title={initial ? "Editar registro" : "Nuevo registro de ingreso"} onClose={onClose}>
       <Field label="Paciente">
-        <PatientPicker pacientes={pacientes} value={pacienteId} onChange={setPacienteId} onCreateNew={onCreatePaciente} />
+        <PatientPicker pacientes={pacientes} value={pacienteId} onChange={setPacienteId} onCreateNew={(nombre) => { setCreandoNombre(nombre); return null; }} />
       </Field>
 
       {mensualidad && (
@@ -1081,6 +1082,19 @@ function NuevoRegistroModal({ pacientes, onCreatePaciente, onClose, onSave, init
         <Btn variant="primary" onClick={() => pacienteId && onSave({ pacienteId, fecha, hora, profesional, tipo, notas })}>{initial ? "Guardar cambios" : "Guardar registro"}</Btn>
       </div>
     </Modal>
+    {creandoNombre !== null && (
+      <PacienteModal
+        title="Nuevo paciente"
+        initial={{ nombre: creandoNombre }}
+        onClose={() => setCreandoNombre(null)}
+        onSave={(datos) => {
+          const nuevo = onCreatePacienteCompleto(datos);
+          setPacienteId(nuevo.id);
+          setCreandoNombre(null);
+        }}
+      />
+    )}
+    </>
   );
 }
 
