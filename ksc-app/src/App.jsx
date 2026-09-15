@@ -982,6 +982,9 @@ function RegistroTabla({ filas, pacienteById, onEditar, onEliminar, vacioTexto }
 }
 
 function RegistroResumenPorPaciente({ filas, pacienteById, titulo }) {
+  const [expandido, setExpandido] = useState(false);
+  const LIMITE = 5;
+
   const porPaciente = useMemo(() => {
     const map = {};
     filas.forEach((r) => { map[r.pacienteId] = (map[r.pacienteId] || 0) + 1; });
@@ -990,18 +993,28 @@ function RegistroResumenPorPaciente({ filas, pacienteById, titulo }) {
       .sort((a, b) => b.cantidad - a.cantidad);
   }, [filas]);
 
+  const visibles = expandido ? porPaciente : porPaciente.slice(0, LIMITE);
+  const hayMas = porPaciente.length > LIMITE;
+
   return (
     <div className="panel" style={{ padding: 20, marginBottom: 18 }}>
       <h4 className="chart-title">{titulo}</h4>
       {porPaciente.length === 0 ? <p className="muted-text">Todavía no hay registros en este período.</p> : (
-        <table>
-          <thead><tr><th>Paciente</th><th>Cantidad de visitas</th></tr></thead>
-          <tbody>
-            {porPaciente.map((r) => (
-              <tr key={r.pacienteId}><td style={{ fontWeight: 600 }}>{r.nombre}</td><td>{r.cantidad}</td></tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          <table>
+            <thead><tr><th>Paciente</th><th>Cantidad de visitas</th></tr></thead>
+            <tbody>
+              {visibles.map((r) => (
+                <tr key={r.pacienteId}><td style={{ fontWeight: 600 }}>{r.nombre}</td><td>{r.cantidad}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          {hayMas && (
+            <button onClick={() => setExpandido(!expandido)} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13, marginTop: 12, padding: 0 }}>
+              {expandido ? "Ver menos" : `Ver los ${porPaciente.length} pacientes`}
+            </button>
+          )}
+        </>
       )}
     </div>
   );
