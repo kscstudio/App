@@ -891,27 +891,11 @@ function ConfirmModal({ title, message, confirmLabel = "Eliminar", onConfirm, on
 
 // ================= REGISTRO DIARIO =================
 function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }) {
-  const [semanaInicio, setSemanaInicio] = useState(mondayOf(todayISO()));
+  const [tab, setTab] = useState("semana");
   const [showNew, setShowNew] = useState(false);
   const [editando, setEditando] = useState(null);
-  const semanaFin = addDays(semanaInicio, 6);
 
   const pacienteById = (id) => pacientes.find((p) => p.id === id);
-
-  const deLaSemana = useMemo(
-    () => registros.filter((r) => r.fecha >= semanaInicio && r.fecha <= semanaFin).sort((a, b) => b.fecha.localeCompare(a.fecha)),
-    [registros, semanaInicio, semanaFin]
-  );
-
-  const porPaciente = useMemo(() => {
-    const map = {};
-    deLaSemana.forEach((r) => {
-      map[r.pacienteId] = (map[r.pacienteId] || 0) + 1;
-    });
-    return Object.entries(map)
-      .map(([pacienteId, cantidad]) => ({ pacienteId, cantidad, nombre: pacienteById(pacienteId)?.nombre || "Paciente eliminado" }))
-      .sort((a, b) => b.cantidad - a.cantidad);
-  }, [deLaSemana, pacientes]);
 
   const crearPacienteCompleto = (datos) => {
     const nuevo = { id: uid(), historial: [], ...datos };
@@ -923,24 +907,6 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
   const updateRegistro = (id, patch) => setRegistros(registros.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const delRegistro = (id) => setRegistros(registros.filter((r) => r.id !== id));
 
-  const cambiarSemana = (delta) => setSemanaInicio(addDays(semanaInicio, delta * 7));
-
-  const descargarExcel = () => {
-    const filas = deLaSemana.map((r) => ({
-      Fecha: fmtDate(r.fecha),
-      Hora: r.hora || "",
-      Paciente: pacienteById(r.pacienteId)?.nombre || "Paciente eliminado",
-      Profesional: r.profesional,
-      "Individual o mensualidad": r.tipo,
-      Notas: r.notas || "",
-    }));
-    const hoja = XLSX.utils.json_to_sheet(filas);
-    hoja["!cols"] = [{ wch: 14 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 20 }, { wch: 30 }];
-    const libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, hoja, "Registro diario");
-    XLSX.writeFile(libro, `registro-diario-KSC-${semanaInicio}.xlsx`);
-  };
-
   return (
     <div>
       <div className="page-head">
@@ -951,58 +917,16 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
         <Btn variant="clay" onClick={() => setShowNew(true)}><Plus size={16} /> Nuevo registro</Btn>
       </div>
 
-      <div className="panel" style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
-        <button className="icon-btn" onClick={() => cambiarSemana(-1)}><ChevronLeft size={20} /></button>
-        <input type="date" value={semanaInicio} onChange={(e) => setSemanaInicio(mondayOf(e.target.value))} style={{ border: "1px solid #D6CBB8", padding: "7px 10px", borderRadius: 3, fontFamily: "'IBM Plex Sans',sans-serif" }} />
-        <button className="icon-btn" onClick={() => cambiarSemana(1)}><ChevronRight size={20} /></button>
-        <span style={{ fontFamily: "'Fraunces',serif", fontSize: 16 }}>Semana del {fmtDate(semanaInicio)} al {fmtDate(semanaFin)}</span>
-        <button onClick={() => setSemanaInicio(mondayOf(todayISO()))} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Esta semana</button>
-        <div style={{ marginLeft: "auto" }}>
-          <Btn variant="ghost" small onClick={descargarExcel}><FileDown size={13} /> Descargar Excel</Btn>
-        </div>
+      <div className="tab-switch">
+        <button className={"tab-btn" + (tab === "semana" ? " active" : "")} onClick={() => setTab("semana")}>Semana</button>
+        <button className={"tab-btn" + (tab === "mes" ? " active" : "")} onClick={() => setTab("mes")}>Mes</button>
       </div>
 
-      <div className="panel" style={{ padding: 20, marginBottom: 18 }}>
-        <h4 className="chart-title">Quién vino esta semana y cuántas veces</h4>
-        {porPaciente.length === 0 ? <p className="muted-text">Todavía no hay registros esta semana.</p> : (
-          <table>
-            <thead><tr><th>Paciente</th><th>Veces esta semana</th></tr></thead>
-            <tbody>
-              {porPaciente.map((r) => (
-                <tr key={r.pacienteId}><td style={{ fontWeight: 600 }}>{r.nombre}</td><td>{r.cantidad}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="panel">
-        {deLaSemana.length === 0 ? (
-          <div className="empty-state">No hay registros cargados esta semana. Cargá el primero con "Nuevo registro".</div>
-        ) : (
-          <table>
-            <thead><tr><th>Fecha</th><th>Hora</th><th>Paciente</th><th>Profesional</th><th>Tipo</th><th>Notas</th><th></th></tr></thead>
-            <tbody>
-              {deLaSemana.map((r) => (
-                <tr key={r.id}>
-                  <td>{fmtDate(r.fecha)}</td>
-                  <td>{r.hora || "—"}</td>
-                  <td style={{ fontWeight: 600 }}>{pacienteById(r.pacienteId)?.nombre || "Paciente eliminado"}</td>
-                  <td>{r.profesional}</td>
-                  <td><Badge tone={r.tipo === "Mensual" ? "clay" : "sage"}>{r.tipo}</Badge></td>
-                  <td>{r.notas || "—"}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="icon-btn" title="Editar" onClick={() => setEditando(r)}><Pencil size={15} /></button>
-                      <button className="icon-btn" title="Eliminar" onClick={() => delRegistro(r.id)}><Trash2 size={15} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {tab === "semana" ? (
+        <RegistroSemanaView registros={registros} pacientes={pacientes} pacienteById={pacienteById} onEditar={setEditando} onEliminar={delRegistro} />
+      ) : (
+        <RegistroMesView registros={registros} pacientes={pacientes} pacienteById={pacienteById} onEditar={setEditando} onEliminar={delRegistro} />
+      )}
 
       {showNew && (
         <NuevoRegistroModal
@@ -1024,6 +948,134 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
     </div>
   );
 }
+
+function RegistroTabla({ filas, pacienteById, onEditar, onEliminar, vacioTexto }) {
+  return (
+    <div className="panel">
+      {filas.length === 0 ? (
+        <div className="empty-state">{vacioTexto}</div>
+      ) : (
+        <table>
+          <thead><tr><th>Fecha</th><th>Hora</th><th>Paciente</th><th>Profesional</th><th>Tipo</th><th>Notas</th><th></th></tr></thead>
+          <tbody>
+            {filas.map((r) => (
+              <tr key={r.id}>
+                <td>{fmtDate(r.fecha)}</td>
+                <td>{r.hora || "—"}</td>
+                <td style={{ fontWeight: 600 }}>{pacienteById(r.pacienteId)?.nombre || "Paciente eliminado"}</td>
+                <td>{r.profesional}</td>
+                <td><Badge tone={r.tipo === "Mensual" ? "clay" : "sage"}>{r.tipo}</Badge></td>
+                <td>{r.notas || "—"}</td>
+                <td>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="icon-btn" title="Editar" onClick={() => onEditar(r)}><Pencil size={15} /></button>
+                    <button className="icon-btn" title="Eliminar" onClick={() => onEliminar(r.id)}><Trash2 size={15} /></button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function RegistroResumenPorPaciente({ filas, pacienteById, titulo }) {
+  const porPaciente = useMemo(() => {
+    const map = {};
+    filas.forEach((r) => { map[r.pacienteId] = (map[r.pacienteId] || 0) + 1; });
+    return Object.entries(map)
+      .map(([pacienteId, cantidad]) => ({ pacienteId, cantidad, nombre: pacienteById(pacienteId)?.nombre || "Paciente eliminado" }))
+      .sort((a, b) => b.cantidad - a.cantidad);
+  }, [filas]);
+
+  return (
+    <div className="panel" style={{ padding: 20, marginBottom: 18 }}>
+      <h4 className="chart-title">{titulo}</h4>
+      {porPaciente.length === 0 ? <p className="muted-text">Todavía no hay registros en este período.</p> : (
+        <table>
+          <thead><tr><th>Paciente</th><th>Cantidad de visitas</th></tr></thead>
+          <tbody>
+            {porPaciente.map((r) => (
+              <tr key={r.pacienteId}><td style={{ fontWeight: 600 }}>{r.nombre}</td><td>{r.cantidad}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function descargarExcelRegistros(filas, pacienteById, nombreArchivo) {
+  const filasExcel = filas.map((r) => ({
+    Fecha: fmtDate(r.fecha),
+    Hora: r.hora || "",
+    Paciente: pacienteById(r.pacienteId)?.nombre || "Paciente eliminado",
+    Profesional: r.profesional,
+    "Individual o mensualidad": r.tipo,
+    Notas: r.notas || "",
+  }));
+  const hoja = XLSX.utils.json_to_sheet(filasExcel);
+  hoja["!cols"] = [{ wch: 14 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 20 }, { wch: 30 }];
+  const libro = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(libro, hoja, "Registro diario");
+  XLSX.writeFile(libro, nombreArchivo);
+}
+
+function RegistroSemanaView({ registros, pacientes, pacienteById, onEditar, onEliminar }) {
+  const [semanaInicio, setSemanaInicio] = useState(mondayOf(todayISO()));
+  const semanaFin = addDays(semanaInicio, 6);
+
+  const deLaSemana = useMemo(
+    () => registros.filter((r) => r.fecha >= semanaInicio && r.fecha <= semanaFin).sort((a, b) => b.fecha.localeCompare(a.fecha)),
+    [registros, semanaInicio, semanaFin]
+  );
+
+  const cambiarSemana = (delta) => setSemanaInicio(addDays(semanaInicio, delta * 7));
+
+  return (
+    <div>
+      <div className="panel" style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
+        <button className="icon-btn" onClick={() => cambiarSemana(-1)}><ChevronLeft size={20} /></button>
+        <input type="date" value={semanaInicio} onChange={(e) => setSemanaInicio(mondayOf(e.target.value))} style={{ border: "1px solid #D6CBB8", padding: "7px 10px", borderRadius: 3, fontFamily: "'IBM Plex Sans',sans-serif" }} />
+        <button className="icon-btn" onClick={() => cambiarSemana(1)}><ChevronRight size={20} /></button>
+        <span style={{ fontFamily: "'Fraunces',serif", fontSize: 16 }}>Semana del {fmtDate(semanaInicio)} al {fmtDate(semanaFin)}</span>
+        <button onClick={() => setSemanaInicio(mondayOf(todayISO()))} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Esta semana</button>
+        <div style={{ marginLeft: "auto" }}>
+          <Btn variant="ghost" small onClick={() => descargarExcelRegistros(deLaSemana, pacienteById, `registro-diario-semana-KSC-${semanaInicio}.xlsx`)}><FileDown size={13} /> Descargar Excel</Btn>
+        </div>
+      </div>
+
+      <RegistroResumenPorPaciente filas={deLaSemana} pacienteById={pacienteById} titulo="Quién vino esta semana y cuántas veces" />
+      <RegistroTabla filas={deLaSemana} pacienteById={pacienteById} onEditar={onEditar} onEliminar={onEliminar} vacioTexto={'No hay registros cargados esta semana. Cargá el primero con "Nuevo registro".'} />
+    </div>
+  );
+}
+
+function RegistroMesView({ registros, pacientes, pacienteById, onEditar, onEliminar }) {
+  const [mes, setMes] = useState(todayISO().slice(0, 7));
+
+  const delMes = useMemo(
+    () => registros.filter((r) => r.fecha.slice(0, 7) === mes).sort((a, b) => b.fecha.localeCompare(a.fecha)),
+    [registros, mes]
+  );
+
+  return (
+    <div>
+      <div className="panel" style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
+        <Field label="Mes"><input type="month" value={mes} onChange={(e) => setMes(e.target.value)} /></Field>
+        <div style={{ marginLeft: "auto" }}>
+          <Btn variant="ghost" small onClick={() => descargarExcelRegistros(delMes, pacienteById, `registro-diario-mes-KSC-${mes}.xlsx`)}><FileDown size={13} /> Descargar Excel</Btn>
+        </div>
+      </div>
+
+      <RegistroResumenPorPaciente filas={delMes} pacienteById={pacienteById} titulo="Quién vino este mes y cuántas veces" />
+      <RegistroTabla filas={delMes} pacienteById={pacienteById} onEditar={onEditar} onEliminar={onEliminar} vacioTexto={'No hay registros cargados este mes.'} />
+    </div>
+  );
+}
+
 
 function NuevoRegistroModal({ pacientes, onCreatePacienteCompleto, onClose, onSave, initial = null }) {
   const [pacienteId, setPacienteId] = useState(initial?.pacienteId || "");
@@ -1419,6 +1471,7 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
       <div className="tab-switch">
         <button className={"tab-btn" + (tab === "mes" ? " active" : "")} onClick={() => setTab("mes")}>Cobros del mes</button>
         <button className={"tab-btn" + (tab === "semana" ? " active" : "")} onClick={() => setTab("semana")}>Reporte semanal</button>
+        <button className={"tab-btn" + (tab === "reportemensual" ? " active" : "")} onClick={() => setTab("reportemensual")}>Reporte mensual</button>
         <button className={"tab-btn" + (tab === "vencimientos" ? " active" : "")} onClick={() => setTab("vencimientos")}>Vencimientos</button>
       </div>
 
@@ -1460,6 +1513,8 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
         </>
       ) : tab === "semana" ? (
         <ReporteSemanalView cobros={cobros} turnos={turnos} pacientes={pacientes} />
+      ) : tab === "reportemensual" ? (
+        <ReporteMensualView cobros={cobros} turnos={turnos} pacientes={pacientes} />
       ) : (
         <VencimientosView pacientes={pacientes} />
       )}
@@ -1530,48 +1585,36 @@ function waVencimiento(nombre, vencimiento, dias) {
   return `Hola ${primerNombre}! Te recordamos desde KSC Studio que tu mensualidad vence el ${fmtDate(vencimiento)}. ¡Te esperamos para renovarla!`;
 }
 
-function ReporteSemanalView({ cobros, turnos, pacientes }) {
-  const [semanaInicio, setSemanaInicio] = useState(mondayOf(todayISO()));
-  const semanaFin = addDays(semanaInicio, 6);
-
-  const turnosSemana = useMemo(
-    () => turnos.filter((t) => t.fecha >= semanaInicio && t.fecha <= semanaFin),
-    [turnos, semanaInicio, semanaFin]
-  );
-  const cobrosSemana = useMemo(
-    () => cobros.filter((c) => c.fecha >= semanaInicio && c.fecha <= semanaFin).sort((a, b) => a.fecha.localeCompare(b.fecha)),
-    [cobros, semanaInicio, semanaFin]
-  );
-
-  const totalRecaudado = cobrosSemana.reduce((a, c) => a + Number(c.monto || 0), 0);
-  const ticketPromedio = cobrosSemana.length ? totalRecaudado / cobrosSemana.length : 0;
+function ReportePeriodoView({ turnosPeriodo, cobrosPeriodo, pacientes, tituloInforme, subtituloPeriodo, nombreArchivoBase, navegador }) {
+  const totalRecaudado = cobrosPeriodo.reduce((a, c) => a + Number(c.monto || 0), 0);
+  const ticketPromedio = cobrosPeriodo.length ? totalRecaudado / cobrosPeriodo.length : 0;
 
   const porProfesional = useMemo(() => {
     const map = {};
-    turnosSemana.forEach((t) => {
+    turnosPeriodo.forEach((t) => {
       if (!map[t.profesional]) map[t.profesional] = { profesional: t.profesional, total: 0, atendidos: 0, cancelados: 0 };
       map[t.profesional].total += 1;
       if (t.estado === "Atendido") map[t.profesional].atendidos += 1;
       if (t.estado === "Cancelado") map[t.profesional].cancelados += 1;
     });
     return Object.values(map).sort((a, b) => b.total - a.total);
-  }, [turnosSemana]);
+  }, [turnosPeriodo]);
 
   const porActividad = useMemo(() => {
     const map = {};
-    turnosSemana.forEach((t) => { map[t.actividad] = (map[t.actividad] || 0) + 1; });
+    turnosPeriodo.forEach((t) => { map[t.actividad] = (map[t.actividad] || 0) + 1; });
     return Object.entries(map).map(([actividad, cantidad]) => ({ actividad, cantidad }));
-  }, [turnosSemana]);
+  }, [turnosPeriodo]);
 
   const porMetodo = useMemo(() => {
     const map = {};
-    cobrosSemana.forEach((c) => { map[c.metodo] = (map[c.metodo] || 0) + Number(c.monto || 0); });
+    cobrosPeriodo.forEach((c) => { map[c.metodo] = (map[c.metodo] || 0) + Number(c.monto || 0); });
     return Object.entries(map).map(([metodo, monto]) => ({ metodo, monto }));
-  }, [cobrosSemana]);
+  }, [cobrosPeriodo]);
 
   const porPaciente = useMemo(() => {
     const map = {};
-    cobrosSemana.forEach((c) => {
+    cobrosPeriodo.forEach((c) => {
       const key = c.pacienteId;
       if (!map[key]) map[key] = { pacienteId: key, total: 0, pagos: [] };
       map[key].total += Number(c.monto || 0);
@@ -1580,16 +1623,14 @@ function ReporteSemanalView({ cobros, turnos, pacientes }) {
     return Object.values(map)
       .map((r) => ({ ...r, nombre: pacientes.find((p) => p.id === r.pacienteId)?.nombre || "Paciente eliminado" }))
       .sort((a, b) => b.total - a.total);
-  }, [cobrosSemana, pacientes]);
+  }, [cobrosPeriodo, pacientes]);
 
-  const cancelados = turnosSemana.filter((t) => t.estado === "Cancelado").length;
-  const tasaCancelacion = turnosSemana.length ? Math.round((cancelados / turnosSemana.length) * 100) : 0;
-
-  const cambiarSemana = (delta) => setSemanaInicio(addDays(semanaInicio, delta * 7));
+  const cancelados = turnosPeriodo.filter((t) => t.estado === "Cancelado").length;
+  const tasaCancelacion = turnosPeriodo.length ? Math.round((cancelados / turnosPeriodo.length) * 100) : 0;
 
   const descargarInforme = () => {
     const filas = (arr, cols) => arr.map((r) => `<tr>${cols.map((c) => `<td>${c(r)}</td>`).join("")}</tr>`).join("");
-    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Reporte semanal KSC Studio</title>
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${tituloInforme} KSC Studio</title>
 <style>
   body{ font-family:'IBM Plex Sans',Arial,sans-serif; background:#F5F1E9; color:#14100C; margin:0; padding:36px; }
   .brand{ display:flex; align-items:center; gap:14px; margin-bottom:26px; }
@@ -1609,27 +1650,27 @@ function ReporteSemanalView({ cobros, turnos, pacientes }) {
   .foot{ margin-top:34px; font-size:11.5px; color:#A89D8C; }
   @media print{ body{ background:#fff; } }
 </style></head><body>
-  <div class="brand"><div class="badge"><b>KSC</b><span>STUDIO</span></div><div><h1>Reporte semanal</h1><p>Semana del ${fmtDate(semanaInicio)} al ${fmtDate(semanaFin)}</p></div></div>
+  <div class="brand"><div class="badge"><b>KSC</b><span>STUDIO</span></div><div><h1>${tituloInforme}</h1><p>${subtituloPeriodo}</p></div></div>
 
   <div class="stats">
     <div class="stat"><div class="label">Total recaudado</div><div class="value">${fmtMoney(totalRecaudado)}</div></div>
-    <div class="stat"><div class="label">Cobros registrados</div><div class="value">${cobrosSemana.length}</div></div>
+    <div class="stat"><div class="label">Cobros registrados</div><div class="value">${cobrosPeriodo.length}</div></div>
     <div class="stat"><div class="label">Ticket promedio</div><div class="value">${fmtMoney(ticketPromedio)}</div></div>
-    <div class="stat"><div class="label">Turnos totales</div><div class="value">${turnosSemana.length}</div></div>
+    <div class="stat"><div class="label">Turnos totales</div><div class="value">${turnosPeriodo.length}</div></div>
     <div class="stat"><div class="label">Tasa de cancelación</div><div class="value">${tasaCancelacion}%</div></div>
   </div>
 
   <h2>Turnos por profesional</h2>
   <table><thead><tr><th>Profesional</th><th>Turnos totales</th><th>Atendidos</th><th>Cancelados</th></tr></thead>
-  <tbody>${porProfesional.length ? filas(porProfesional, [r => r.profesional, r => r.total, r => r.atendidos, r => r.cancelados]) : '<tr><td colspan="4">Sin turnos esta semana.</td></tr>'}</tbody></table>
+  <tbody>${porProfesional.length ? filas(porProfesional, [r => r.profesional, r => r.total, r => r.atendidos, r => r.cancelados]) : '<tr><td colspan="4">Sin turnos en este período.</td></tr>'}</tbody></table>
 
   <h2>Turnos por actividad</h2>
   <table><thead><tr><th>Actividad</th><th>Cantidad</th></tr></thead>
-  <tbody>${porActividad.length ? filas(porActividad, [r => r.actividad, r => r.cantidad]) : '<tr><td colspan="2">Sin turnos esta semana.</td></tr>'}</tbody></table>
+  <tbody>${porActividad.length ? filas(porActividad, [r => r.actividad, r => r.cantidad]) : '<tr><td colspan="2">Sin turnos en este período.</td></tr>'}</tbody></table>
 
   <h2>Recaudado por método de pago</h2>
   <table><thead><tr><th>Método</th><th>Monto</th></tr></thead>
-  <tbody>${porMetodo.length ? filas(porMetodo, [r => r.metodo, r => fmtMoney(r.monto)]) : '<tr><td colspan="2">Sin cobros esta semana.</td></tr>'}</tbody></table>
+  <tbody>${porMetodo.length ? filas(porMetodo, [r => r.metodo, r => fmtMoney(r.monto)]) : '<tr><td colspan="2">Sin cobros en este período.</td></tr>'}</tbody></table>
 
   <h2>Cómo pagó cada paciente</h2>
   <table><thead><tr><th>Paciente</th><th>Total pagado</th><th>Detalle</th></tr></thead>
@@ -1637,16 +1678,16 @@ function ReporteSemanalView({ cobros, turnos, pacientes }) {
     r => r.nombre,
     r => fmtMoney(r.total),
     r => r.pagos.map((p) => `${fmtDate(p.fecha)} · ${p.concepto} · ${p.metodo} · ${fmtMoney(p.monto)}`).join("<br/>")
-  ]) : '<tr><td colspan="3">Sin cobros esta semana.</td></tr>'}</tbody></table>
+  ]) : '<tr><td colspan="3">Sin cobros en este período.</td></tr>'}</tbody></table>
 
   <div class="foot">Generado desde el sistema de gestión de KSC Studio el ${fmtDate(todayISO())}. Para guardarlo como PDF, abrí este archivo y usá "Imprimir → Guardar como PDF".</div>
 </body></html>`;
-    descargarArchivo(`reporte-semanal-KSC-${semanaInicio}.html`, html, "text/html;charset=utf-8");
+    descargarArchivo(`${tituloInforme.toLowerCase().replace(/\s+/g, "-")}-${nombreArchivoBase}.html`, html, "text/html;charset=utf-8");
   };
 
   const descargarCSV = () => {
     const header = ["Fecha", "Paciente", "Concepto", "Metodo", "Monto"];
-    const rows = cobrosSemana.map((c) => [
+    const rows = cobrosPeriodo.map((c) => [
       c.fecha,
       pacientes.find((p) => p.id === c.pacienteId)?.nombre || "Paciente eliminado",
       c.concepto,
@@ -1654,17 +1695,13 @@ function ReporteSemanalView({ cobros, turnos, pacientes }) {
       c.monto,
     ]);
     const csv = [header, ...rows].map((r) => r.map(csvEscape).join(";")).join("\n");
-    descargarArchivo(`cobros-semana-KSC-${semanaInicio}.csv`, "\uFEFF" + csv, "text/csv;charset=utf-8");
+    descargarArchivo(`cobros-${nombreArchivoBase}.csv`, "\uFEFF" + csv, "text/csv;charset=utf-8");
   };
 
   return (
     <div>
       <div className="panel" style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
-        <button className="icon-btn" onClick={() => cambiarSemana(-1)}><ChevronLeft size={20} /></button>
-        <input type="date" value={semanaInicio} onChange={(e) => setSemanaInicio(mondayOf(e.target.value))} style={{ border: "1px solid #D6CBB8", padding: "7px 10px", borderRadius: 3, fontFamily: "'IBM Plex Sans',sans-serif" }} />
-        <button className="icon-btn" onClick={() => cambiarSemana(1)}><ChevronRight size={20} /></button>
-        <span style={{ fontFamily: "'Fraunces',serif", fontSize: 16 }}>Semana del {fmtDate(semanaInicio)} al {fmtDate(semanaFin)}</span>
-        <button onClick={() => setSemanaInicio(mondayOf(todayISO()))} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Esta semana</button>
+        {navegador}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <Btn variant="ghost" small onClick={descargarCSV}><Download size={13} /> CSV de cobros</Btn>
           <Btn variant="clay" small onClick={descargarInforme}><FileDown size={13} /> Descargar informe</Btn>
@@ -1673,15 +1710,15 @@ function ReporteSemanalView({ cobros, turnos, pacientes }) {
 
       <div style={{ display: "flex", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
         <StatCard label="Total recaudado" value={fmtMoney(totalRecaudado)} />
-        <StatCard label="Cobros registrados" value={cobrosSemana.length} />
+        <StatCard label="Cobros registrados" value={cobrosPeriodo.length} />
         <StatCard label="Ticket promedio" value={fmtMoney(ticketPromedio)} />
-        <StatCard label="Turnos totales" value={turnosSemana.length} />
+        <StatCard label="Turnos totales" value={turnosPeriodo.length} />
         <StatCard label="Tasa de cancelación" value={`${tasaCancelacion}%`} />
       </div>
 
       <div className="panel" style={{ padding: 20, marginBottom: 18 }}>
         <h4 className="chart-title">Turnos por profesional</h4>
-        {porProfesional.length === 0 ? <p className="muted-text">Sin turnos cargados esta semana.</p> : (
+        {porProfesional.length === 0 ? <p className="muted-text">Sin turnos cargados en este período.</p> : (
           <table>
             <thead><tr><th>Profesional</th><th>Turnos</th><th>Atendidos</th><th>Cancelados</th></tr></thead>
             <tbody>
@@ -1700,7 +1737,7 @@ function ReporteSemanalView({ cobros, turnos, pacientes }) {
 
       <div className="panel" style={{ padding: 20, marginBottom: 18 }}>
         <h4 className="chart-title">Recaudado por método de pago</h4>
-        {porMetodo.length === 0 ? <p className="muted-text">Sin cobros esta semana.</p> : (
+        {porMetodo.length === 0 ? <p className="muted-text">Sin cobros en este período.</p> : (
           <table>
             <thead><tr><th>Método</th><th>Monto</th></tr></thead>
             <tbody>
@@ -1714,7 +1751,7 @@ function ReporteSemanalView({ cobros, turnos, pacientes }) {
 
       <div className="panel" style={{ padding: 20 }}>
         <h4 className="chart-title">Cómo pagó cada paciente</h4>
-        {porPaciente.length === 0 ? <p className="muted-text">Sin cobros esta semana.</p> : (
+        {porPaciente.length === 0 ? <p className="muted-text">Sin cobros en este período.</p> : (
           <table>
             <thead><tr><th>Paciente</th><th>Pagos</th><th>Total</th></tr></thead>
             <tbody>
@@ -1733,6 +1770,79 @@ function ReporteSemanalView({ cobros, turnos, pacientes }) {
     </div>
   );
 }
+
+function ReporteSemanalView({ cobros, turnos, pacientes }) {
+  const [semanaInicio, setSemanaInicio] = useState(mondayOf(todayISO()));
+  const semanaFin = addDays(semanaInicio, 6);
+
+  const turnosSemana = useMemo(
+    () => turnos.filter((t) => t.fecha >= semanaInicio && t.fecha <= semanaFin),
+    [turnos, semanaInicio, semanaFin]
+  );
+  const cobrosSemana = useMemo(
+    () => cobros.filter((c) => c.fecha >= semanaInicio && c.fecha <= semanaFin).sort((a, b) => a.fecha.localeCompare(b.fecha)),
+    [cobros, semanaInicio, semanaFin]
+  );
+
+  const cambiarSemana = (delta) => setSemanaInicio(addDays(semanaInicio, delta * 7));
+
+  const navegador = (
+    <>
+      <button className="icon-btn" onClick={() => cambiarSemana(-1)}><ChevronLeft size={20} /></button>
+      <input type="date" value={semanaInicio} onChange={(e) => setSemanaInicio(mondayOf(e.target.value))} style={{ border: "1px solid #D6CBB8", padding: "7px 10px", borderRadius: 3, fontFamily: "'IBM Plex Sans',sans-serif" }} />
+      <button className="icon-btn" onClick={() => cambiarSemana(1)}><ChevronRight size={20} /></button>
+      <span style={{ fontFamily: "'Fraunces',serif", fontSize: 16 }}>Semana del {fmtDate(semanaInicio)} al {fmtDate(semanaFin)}</span>
+      <button onClick={() => setSemanaInicio(mondayOf(todayISO()))} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Esta semana</button>
+    </>
+  );
+
+  return (
+    <ReportePeriodoView
+      turnosPeriodo={turnosSemana}
+      cobrosPeriodo={cobrosSemana}
+      pacientes={pacientes}
+      tituloInforme="Reporte semanal"
+      subtituloPeriodo={`Semana del ${fmtDate(semanaInicio)} al ${fmtDate(semanaFin)}`}
+      nombreArchivoBase={`semana-KSC-${semanaInicio}`}
+      navegador={navegador}
+    />
+  );
+}
+
+function ReporteMensualView({ cobros, turnos, pacientes }) {
+  const [mes, setMes] = useState(todayISO().slice(0, 7));
+
+  const turnosMes = useMemo(() => turnos.filter((t) => t.fecha.slice(0, 7) === mes), [turnos, mes]);
+  const cobrosMes = useMemo(
+    () => cobros.filter((c) => c.fecha.slice(0, 7) === mes).sort((a, b) => a.fecha.localeCompare(b.fecha)),
+    [cobros, mes]
+  );
+
+  const nombresMes = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  const [anio, mesNum] = mes.split("-");
+  const labelMes = `${nombresMes[Number(mesNum) - 1]} de ${anio}`;
+
+  const navegador = (
+    <>
+      <Field label="Mes"><input type="month" value={mes} onChange={(e) => setMes(e.target.value)} /></Field>
+      <span style={{ fontFamily: "'Fraunces',serif", fontSize: 16, textTransform: "capitalize" }}>{labelMes}</span>
+      <button onClick={() => setMes(todayISO().slice(0, 7))} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Este mes</button>
+    </>
+  );
+
+  return (
+    <ReportePeriodoView
+      turnosPeriodo={turnosMes}
+      cobrosPeriodo={cobrosMes}
+      pacientes={pacientes}
+      tituloInforme="Reporte mensual"
+      subtituloPeriodo={`Mes de ${labelMes}`}
+      nombreArchivoBase={`mes-KSC-${mes}`}
+      navegador={navegador}
+    />
+  );
+}
+
 
 function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
   const [pacienteId, setPacienteId] = useState("");
