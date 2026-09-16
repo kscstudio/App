@@ -275,12 +275,18 @@ export default function KSCStudioApp() {
   const [perfil, setPerfil] = useState(null);
   const [perfilLoading, setPerfilLoading] = useState(true);
 
-  const [pacientes, setPacientes] = useSupabaseTable("pacientes", mapPacientes);
-  const [turnos, setTurnos] = useSupabaseTable("turnos", mapTurnos);
-  const [cobros, setCobros] = useSupabaseTable("cobros", mapCobros);
-  const [registros, setRegistros] = useSupabaseTable("registros_diarios", mapRegistros);
-  const [contactos, setContactos] = useContactosSupabase();
-  const [perfiles, setPerfiles] = useSupabaseTable("perfiles", mapPerfiles);
+  const [pacientes, setPacientes, pacReady, pacError, pacRecargar] = useSupabaseTable("pacientes", mapPacientes);
+  const [turnos, setTurnos, turReady, turError, turRecargar] = useSupabaseTable("turnos", mapTurnos);
+  const [cobros, setCobros, cobReady, cobError, cobRecargar] = useSupabaseTable("cobros", mapCobros);
+  const [registros, setRegistros, regReady, regError, regRecargar] = useSupabaseTable("registros_diarios", mapRegistros);
+  const [contactos, setContactos, conReady, conError, conRecargar] = useContactosSupabase();
+  const [perfiles, setPerfiles, perfReady, perfError, perfRecargar] = useSupabaseTable("perfiles", mapPerfiles);
+
+  const datosListos = pacReady && turReady && cobReady && regReady && conReady && perfReady;
+  const datosConError = pacError || turError || cobError || regError || conError || perfError;
+  const reintentarCarga = () => {
+    pacRecargar(); turRecargar(); cobRecargar(); regRecargar(); conRecargar(); perfRecargar();
+  };
 
   const pacienteById = useCallback((id) => pacientes.find((p) => p.id === id), [pacientes]);
 
@@ -367,6 +373,42 @@ export default function KSCStudioApp() {
             setPerfil({ ...perfil, debeCambiarPassword: false });
           }}
         />
+        <style>{GLOBAL_CSS}</style>
+      </>
+    );
+  }
+
+  if (!datosListos) {
+    return (
+      <>
+        <FontImports />
+        <div className="auth-screen">
+          <div className="auth-card" style={{ textAlign: "center" }}>
+            <div className="brand-badge" style={{ margin: "0 auto 18px" }}>
+              <span className="brand-badge-ksc">KSC</span>
+              <span className="brand-badge-studio">STUDIO</span>
+            </div>
+            <h1 className="auth-title">Cargando datos…</h1>
+            <p className="auth-sub">Estamos trayendo la agenda, los pacientes y el resto de la información. Puede tardar unos segundos.</p>
+          </div>
+        </div>
+        <style>{GLOBAL_CSS}</style>
+      </>
+    );
+  }
+
+  if (datosConError) {
+    return (
+      <>
+        <FontImports />
+        <div className="auth-screen">
+          <div className="auth-card" style={{ textAlign: "center" }}>
+            <AlertTriangle size={26} color="#B5484B" style={{ marginBottom: 10 }} />
+            <h1 className="auth-title">No pudimos cargar los datos</h1>
+            <p className="auth-sub">Puede ser un problema de conexión. Revisá tu internet y probá de nuevo.</p>
+            <Btn variant="primary" onClick={reintentarCarga}>Reintentar</Btn>
+          </div>
+        </div>
         <style>{GLOBAL_CSS}</style>
       </>
     );
