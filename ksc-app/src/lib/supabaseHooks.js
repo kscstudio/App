@@ -25,27 +25,33 @@ function avisarErrorGuardado(mensaje) {
 export function useSupabaseTable(table, { toRow, fromRow, orderBy } = {}) {
   const [rows, setRows] = useState([]);
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState(null);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
 
   const _toRow = toRow || ((x) => x);
   const _fromRow = fromRow || ((x) => x);
 
+  const cargar = useCallback(async () => {
+    setError(null);
+    let query = supabase.from(table).select("*");
+    if (orderBy) query = query.order(orderBy.column, { ascending: orderBy.ascending !== false });
+    const { data, error: err } = await query;
+    if (err) {
+      console.error(`Error cargando ${table}:`, err.message);
+      setError(err.message);
+      setReady(true);
+      return;
+    }
+    setRows((data || []).map(_fromRow));
+    setReady(true);
+  }, [table]);
+
   useEffect(() => {
     let activo = true;
-
     (async () => {
-      let query = supabase.from(table).select("*");
-      if (orderBy) query = query.order(orderBy.column, { ascending: orderBy.ascending !== false });
-      const { data, error } = await query;
       if (!activo) return;
-      if (error) {
-        console.error(`Error cargando ${table}:`, error.message);
-        setReady(true);
-        return;
-      }
-      setRows((data || []).map(_fromRow));
-      setReady(true);
+      await cargar();
     })();
 
     const canal = supabase
@@ -112,7 +118,7 @@ export function useSupabaseTable(table, { toRow, fromRow, orderBy } = {}) {
     [table]
   );
 
-  return [rows, persistir, ready];
+  return [rows, persistir, ready, error, cargar];
 }
 
 // ---------- Contactos de seguimiento ----------
@@ -121,19 +127,26 @@ export function useSupabaseTable(table, { toRow, fromRow, orderBy } = {}) {
 export function useContactosSupabase() {
   const [mapa, setMapa] = useState({});
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState(null);
+
+  const cargar = useCallback(async () => {
+    setError(null);
+    const { data, error: err } = await supabase.from("contactos").select("*");
+    if (err) {
+      console.error("Error cargando contactos:", err.message);
+      setError(err.message);
+      setReady(true);
+      return;
+    }
+    const m = {};
+    (data || []).forEach((r) => { m[r.paciente_id] = r.fecha; });
+    setMapa(m);
+    setReady(true);
+  }, []);
 
   useEffect(() => {
     let activo = true;
-    (async () => {
-      const { data, error } = await supabase.from("contactos").select("*");
-      if (!activo) return;
-      if (!error && data) {
-        const m = {};
-        data.forEach((r) => { m[r.paciente_id] = r.fecha; });
-        setMapa(m);
-      }
-      setReady(true);
-    })();
+    (async () => { if (activo) await cargar(); })();
 
     const canal = supabase
       .channel("realtime:contactos")
@@ -166,7 +179,7 @@ export function useContactosSupabase() {
     }
   }, []);
 
-  return [mapa, setContactos, ready];
+  return [mapa, setContactos, ready, error, cargar];
 }
 
 // ---------- Mapeos camelCase <-> snake_case por tabla ----------
