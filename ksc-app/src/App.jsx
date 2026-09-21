@@ -1437,6 +1437,7 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
   const [comoConocio, setComoConocio] = useState(initial.comoConocio || "");
   const [fechaIngreso, setFechaIngreso] = useState(initial.fechaIngreso || "");
   const [horario, setHorario] = useState(initial.horario || "");
+  const [ultimoPagoManual, setUltimoPagoManual] = useState(initial.ultimoPagoManual || "");
 
   return (
     <Modal title={title} onClose={onClose}>
@@ -1464,9 +1465,28 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
         </select>
       </Field>
       <Field label="Notas / antecedentes"><textarea rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Alergias, observaciones, preferencias…" /></Field>
+
+      <div style={{ background: "#F2ECDE", border: "1px solid #E9E1D3", borderRadius: 3, padding: "12px 14px", marginBottom: 14 }}>
+        <Field label="Fecha del último pago de mensualidad (opcional)">
+          <input type="date" value={ultimoPagoManual} onChange={(e) => setUltimoPagoManual(e.target.value)} />
+        </Field>
+        <p style={{ fontSize: 12, color: "#7C7264", margin: 0, lineHeight: 1.5 }}>
+          Cargá esto solo si el pago se hizo por fuera de la app (por ejemplo, un paciente que ya pagaba antes de empezar a usar Cobros). Calcula sola la fecha de vencimiento (un mes después) para que aparezca el aviso al registrar su ingreso.
+          {ultimoPagoManual && <><br /><strong>Vencería el {fmtDate(addMonths(ultimoPagoManual, 1))}.</strong></>}
+        </p>
+      </div>
+
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn variant="primary" onClick={() => nombre.trim() && onSave({ nombre: nombre.trim(), telefono, email, nacimiento, notas, comoConocio, fechaIngreso, horario })}>Guardar</Btn>
+        <Btn variant="primary" onClick={() => {
+          if (!nombre.trim()) return;
+          const datos = { nombre: nombre.trim(), telefono, email, nacimiento, notas, comoConocio, fechaIngreso, horario, ultimoPagoManual };
+          if (ultimoPagoManual) {
+            datos.planPago = "Mensual";
+            datos.vencimientoMensualidad = addMonths(ultimoPagoManual, 1);
+          }
+          onSave(datos);
+        }}>Guardar</Btn>
       </div>
     </Modal>
   );
