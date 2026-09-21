@@ -197,6 +197,7 @@ export const mapPacientes = {
     horario: p.horario || "",
     plan_pago: p.planPago || "",
     vencimiento_mensualidad: p.vencimientoMensualidad || null,
+    ultimo_pago_manual: p.ultimoPagoManual || null,
   }),
   fromRow: (r) => ({
     id: r.id,
@@ -211,6 +212,7 @@ export const mapPacientes = {
     horario: r.horario || "",
     planPago: r.plan_pago || "",
     vencimientoMensualidad: r.vencimiento_mensualidad || "",
+    ultimoPagoManual: r.ultimo_pago_manual || "",
   }),
 };
 
