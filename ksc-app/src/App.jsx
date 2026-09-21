@@ -1043,7 +1043,15 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
     return nuevo;
   };
 
-  const addRegistro = (r) => setRegistros([...registros, { id: uid(), ...r }]);
+  const addRegistro = (r) => {
+    setRegistros([...registros, { id: uid(), ...r }]);
+    // Si el paciente había dejado de asistir y tenía el aviso de mensualidad
+    // pausado, al volver a aparecer en el registro se reactiva solo.
+    const paciente = pacientes.find((p) => p.id === r.pacienteId);
+    if (paciente?.pausadoVencimiento) {
+      setPacientes(pacientes.map((p) => (p.id === r.pacienteId ? { ...p, pausadoVencimiento: false } : p)));
+    }
+  };
   const updateRegistro = (id, patch) => setRegistros(registros.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const delRegistro = (id) => setRegistros(registros.filter((r) => r.id !== id));
 
@@ -1726,7 +1734,7 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
       ) : tab === "reportemensual" ? (
         <ReporteMensualView cobros={cobros} turnos={turnos} pacientes={pacientes} />
       ) : (
-        <VencimientosView pacientes={pacientes} />
+        <VencimientosView pacientes={pacientes} setPacientes={setPacientes} />
       )}
 
       {showNew && (
@@ -1738,24 +1746,54 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
   );
 }
 
-function VencimientosView({ pacientes }) {
+function VencimientosView({ pacientes, setPacientes }) {
   const [waPaciente, setWaPaciente] = useState(null);
+  const [q, setQ] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState("todos");
+  const [verPausados, setVerPausados] = useState(false);
+
+  const estadoDe = (dias) => (dias < 0 ? "vencido" : dias <= 5 ? "proximo" : "vigente");
 
   const conMensualidad = pacientes
     .filter((p) => p.planPago === "Mensual" && p.vencimientoMensualidad)
     .map((p) => ({ ...p, dias: diasEntre(todayISO(), p.vencimientoMensualidad) }))
     .sort((a, b) => a.dias - b.dias);
 
+  const activos = conMensualidad.filter((p) => !p.pausadoVencimiento);
+  const pausados = conMensualidad.filter((p) => p.pausadoVencimiento);
+
+  const filtrados = activos
+    .filter((p) => p.nombre.toLowerCase().includes(q.toLowerCase()))
+    .filter((p) => filtroEstado === "todos" || estadoDe(p.dias) === filtroEstado);
+
+  const pausar = (id) => setPacientes(pacientes.map((p) => (p.id === id ? { ...p, pausadoVencimiento: true } : p)));
+  const reactivar = (id) => setPacientes(pacientes.map((p) => (p.id === id ? { ...p, pausadoVencimiento: false } : p)));
+
   return (
     <div>
+      <div className="panel" style={{ padding: "12px 16px", marginBottom: 18, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 200 }}>
+          <Search size={16} color="#A89D8C" />
+          <input type="text" placeholder="Buscar paciente por nombre…" value={q} onChange={(e) => setQ(e.target.value)} style={{ border: "none", fontSize: 14, fontFamily: "'IBM Plex Sans',sans-serif" }} />
+        </div>
+        <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} style={{ border: "1px solid #D6CBB8", borderRadius: 3, padding: "8px 10px", fontSize: 13, fontFamily: "'IBM Plex Sans',sans-serif" }}>
+          <option value="todos">Todos los estados</option>
+          <option value="vencido">Vencidos</option>
+          <option value="proximo">Próximos a vencer</option>
+          <option value="vigente">Vigentes</option>
+        </select>
+      </div>
+
       <div className="panel">
         {conMensualidad.length === 0 ? (
           <div className="empty-state">Ningún paciente con mensualidad cargada todavía. Se completa solo cuando registrás un cobro tipo "Mensual".</div>
+        ) : filtrados.length === 0 ? (
+          <div className="empty-state">No hay pacientes que coincidan con la búsqueda o el filtro elegido.</div>
         ) : (
           <table>
             <thead><tr><th>Paciente</th><th>Vencimiento</th><th>Estado</th><th></th></tr></thead>
             <tbody>
-              {conMensualidad.map((p) => (
+              {filtrados.map((p) => (
                 <tr key={p.id}>
                   <td style={{ fontWeight: 600 }}>{p.nombre}</td>
                   <td>{fmtDate(p.vencimientoMensualidad)}</td>
@@ -1767,9 +1805,12 @@ function VencimientosView({ pacientes }) {
                       : <Badge tone="sage">Vigente ({p.dias} días)</Badge>}
                   </td>
                   <td>
-                    {p.telefono
-                      ? <Btn variant="clay" small onClick={() => setWaPaciente(p)}><MessageCircle size={13} /> WhatsApp</Btn>
-                      : <span className="muted-text" style={{ fontSize: 12.5 }}>Sin teléfono</span>}
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                      {p.telefono
+                        ? <Btn variant="clay" small onClick={() => setWaPaciente(p)}><MessageCircle size={13} /> WhatsApp</Btn>
+                        : <span className="muted-text" style={{ fontSize: 12.5 }}>Sin teléfono</span>}
+                      <Btn variant="ghost" small onClick={() => pausar(p.id)}>No asiste más</Btn>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1777,6 +1818,33 @@ function VencimientosView({ pacientes }) {
           </table>
         )}
       </div>
+
+      {pausados.length > 0 && (
+        <div className="panel" style={{ marginTop: 18 }}>
+          <button onClick={() => setVerPausados(!verPausados)} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13, padding: "14px 16px" }}>
+            {verPausados ? "Ocultar" : `Ver pacientes que dejaron de asistir (${pausados.length})`}
+          </button>
+          {verPausados && (
+            <table>
+              <thead><tr><th>Paciente</th><th>Último vencimiento</th><th></th></tr></thead>
+              <tbody>
+                {pausados.map((p) => (
+                  <tr key={p.id}>
+                    <td style={{ fontWeight: 600 }}>{p.nombre}</td>
+                    <td>{fmtDate(p.vencimientoMensualidad)}</td>
+                    <td><Btn variant="ghost" small onClick={() => reactivar(p.id)}>Reactivar aviso</Btn></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      <p className="muted-text" style={{ fontSize: 12, marginTop: 14 }}>
+        "No asiste más" saca al paciente de esta lista para que no aparezca como vencido. Si vuelve a aparecer en Registro diario, se reactiva solo.
+      </p>
+
       {waPaciente && (
         <WhatsAppModal
           nombre={waPaciente.nombre}
