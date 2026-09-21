@@ -463,7 +463,7 @@ export default function KSCStudioApp() {
         {viewPermitida === "cobros" && <CobrosView cobros={cobros} setCobros={setCobros} pacientes={pacientes} setPacientes={setPacientes} turnos={turnos} />}
         {viewPermitida === "seguimiento" && <SeguimientoView pacientes={pacientes} turnos={turnos} contactos={contactos} setContactos={setContactos} />}
         {viewPermitida === "reportes" && <ReportesView turnos={turnos} cobros={cobros} pacientes={pacientes} />}
-        {viewPermitida === "usuarios" && <UsuariosView usuarios={perfiles} setUsuarios={setPerfiles} currentUser={currentUser} />}
+        {viewPermitida === "usuarios" && <UsuariosView usuarios={perfiles} setUsuarios={setPerfiles} currentUser={currentUser} pacientes={pacientes} turnos={turnos} cobros={cobros} registros={registros} contactos={contactos} />}
       </main>
 
       <style>{GLOBAL_CSS}</style>
@@ -551,8 +551,76 @@ function CambiarPasswordScreen({ usuario, forzado, onGuardar, onClose }) {
   );
 }
 
-function UsuariosView({ usuarios, setUsuarios, currentUser }) {
+function UsuariosView({ usuarios, setUsuarios, currentUser, pacientes, turnos, cobros, registros, contactos }) {
   const cambiarRol = (id, rol) => setUsuarios(usuarios.map((u) => (u.id === id ? { ...u, rol } : u)));
+
+  const descargarRespaldo = () => {
+    const pacienteById = (id) => pacientes.find((p) => p.id === id);
+    const libro = XLSX.utils.book_new();
+
+    const hojaPacientes = XLSX.utils.json_to_sheet(pacientes.map((p) => ({
+      ID: p.id,
+      Nombre: p.nombre,
+      Teléfono: p.telefono || "",
+      Email: p.email || "",
+      "Fecha de nacimiento": p.nacimiento || "",
+      "Fecha de ingreso al tratamiento": p.fechaIngreso || "",
+      Horario: p.horario || "",
+      "Cómo nos conoció": p.comoConocio || "",
+      "Plan de pago": p.planPago || "",
+      "Vencimiento mensualidad": p.vencimientoMensualidad || "",
+      Notas: p.notas || "",
+      "Historial médico (texto)": (p.historial || []).map((h) => `${h.fecha}: ${h.nota}`).join(" | "),
+    })));
+    XLSX.utils.book_append_sheet(libro, hojaPacientes, "Pacientes");
+
+    const hojaTurnos = XLSX.utils.json_to_sheet(turnos.map((t) => ({
+      ID: t.id,
+      "ID Paciente": t.pacienteId,
+      Paciente: pacienteById(t.pacienteId)?.nombre || "",
+      Actividad: t.actividad,
+      Profesional: t.profesional,
+      Fecha: t.fecha,
+      Hora: t.hora,
+      Motivo: t.motivo || "",
+      Estado: t.estado,
+    })));
+    XLSX.utils.book_append_sheet(libro, hojaTurnos, "Turnos");
+
+    const hojaCobros = XLSX.utils.json_to_sheet(cobros.map((c) => ({
+      ID: c.id,
+      "ID Paciente": c.pacienteId,
+      Paciente: pacienteById(c.pacienteId)?.nombre || "",
+      Concepto: c.concepto || "",
+      "Tipo de servicio": c.tipoServicio || "",
+      Monto: c.monto,
+      Método: c.metodo,
+      Fecha: c.fecha,
+      "Tipo de pago": c.tipoPago || "",
+    })));
+    XLSX.utils.book_append_sheet(libro, hojaCobros, "Cobros");
+
+    const hojaRegistros = XLSX.utils.json_to_sheet(registros.map((r) => ({
+      ID: r.id,
+      "ID Paciente": r.pacienteId,
+      Paciente: pacienteById(r.pacienteId)?.nombre || "",
+      Fecha: r.fecha,
+      Hora: r.hora || "",
+      Profesional: r.profesional,
+      Tipo: r.tipo,
+      Notas: r.notas || "",
+    })));
+    XLSX.utils.book_append_sheet(libro, hojaRegistros, "Registro diario");
+
+    const hojaContactos = XLSX.utils.json_to_sheet(Object.entries(contactos || {}).map(([pacienteId, fecha]) => ({
+      "ID Paciente": pacienteId,
+      Paciente: pacienteById(pacienteId)?.nombre || "",
+      "Último contacto de seguimiento": fecha,
+    })));
+    XLSX.utils.book_append_sheet(libro, hojaContactos, "Seguimiento");
+
+    XLSX.writeFile(libro, `respaldo-completo-KSC-${todayISO()}.xlsx`);
+  };
 
   return (
     <div>
@@ -582,6 +650,15 @@ function UsuariosView({ usuarios, setUsuarios, currentUser }) {
           </tbody>
         </table>
       </div>
+
+      <div className="panel" style={{ padding: "18px 20px", marginTop: 18 }}>
+        <h4 className="chart-title" style={{ marginBottom: 8 }}>Respaldo de datos</h4>
+        <p style={{ fontSize: 13, color: "#7C7264", margin: "0 0 14px", lineHeight: 1.6 }}>
+          Descargá una copia completa de todo lo cargado en el sistema (pacientes, turnos, cobros, registro diario y seguimiento) en un solo archivo de Excel con una hoja por sección. Guardala en Google Drive o donde prefieras, como respaldo extra. Recomendamos hacerlo cada semana o cada mes.
+        </p>
+        <Btn variant="clay" onClick={descargarRespaldo}><FileDown size={16} /> Descargar copia de seguridad completa</Btn>
+      </div>
+
       <div className="panel" style={{ padding: "16px 20px", marginTop: 18 }}>
         <p style={{ fontSize: 13, color: "#7C7264", margin: 0, lineHeight: 1.6 }}>
           <strong style={{ color: "#14100C" }}>Para agregar a alguien nuevo o restablecer una contraseña olvidada:</strong> entrá al panel de Supabase del proyecto → Authentication → Users. Ahí podés crear una persona nueva o cambiarle la contraseña directamente. Si es alguien nuevo, después agregale una fila en la tabla "perfiles" con su nombre y rol (mirá el archivo sql/schema.sql para el formato exacto).
