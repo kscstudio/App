@@ -1192,11 +1192,17 @@ function descargarExcelRegistros(filas, pacienteById, nombreArchivo) {
 
 function RegistroSemanaView({ registros, pacientes, pacienteById, onEditar, onEliminar }) {
   const [semanaInicio, setSemanaInicio] = useState(mondayOf(todayISO()));
+  const [q, setQ] = useState("");
   const semanaFin = addDays(semanaInicio, 6);
 
   const deLaSemana = useMemo(
     () => registros.filter((r) => r.fecha >= semanaInicio && r.fecha <= semanaFin).sort((a, b) => b.fecha.localeCompare(a.fecha)),
     [registros, semanaInicio, semanaFin]
+  );
+
+  const filtrados = useMemo(
+    () => deLaSemana.filter((r) => (pacienteById(r.pacienteId)?.nombre || "").toLowerCase().includes(q.toLowerCase())),
+    [deLaSemana, q, pacientes]
   );
 
   const cambiarSemana = (delta) => setSemanaInicio(addDays(semanaInicio, delta * 7));
@@ -1210,22 +1216,33 @@ function RegistroSemanaView({ registros, pacientes, pacienteById, onEditar, onEl
         <span style={{ fontFamily: "'Fraunces',serif", fontSize: 16 }}>Semana del {fmtDate(semanaInicio)} al {fmtDate(semanaFin)}</span>
         <button onClick={() => setSemanaInicio(mondayOf(todayISO()))} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Esta semana</button>
         <div style={{ marginLeft: "auto" }}>
-          <Btn variant="ghost" small onClick={() => descargarExcelRegistros(deLaSemana, pacienteById, `registro-diario-semana-KSC-${semanaInicio}.xlsx`)}><FileDown size={13} /> Descargar Excel</Btn>
+          <Btn variant="ghost" small onClick={() => descargarExcelRegistros(filtrados, pacienteById, `registro-diario-semana-KSC-${semanaInicio}.xlsx`)}><FileDown size={13} /> Descargar Excel</Btn>
         </div>
       </div>
 
-      <RegistroResumenPorPaciente filas={deLaSemana} pacienteById={pacienteById} titulo="Quién vino esta semana y cuántas veces" />
-      <RegistroTabla filas={deLaSemana} pacienteById={pacienteById} onEditar={onEditar} onEliminar={onEliminar} vacioTexto={'No hay registros cargados esta semana. Cargá el primero con "Nuevo registro".'} />
+      <div className="panel" style={{ padding: "10px 16px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10 }}>
+        <Search size={16} color="#A89D8C" />
+        <input type="text" placeholder="Buscar por nombre de paciente…" value={q} onChange={(e) => setQ(e.target.value)} style={{ border: "none", fontSize: 14, fontFamily: "'IBM Plex Sans',sans-serif" }} />
+      </div>
+
+      <RegistroResumenPorPaciente filas={filtrados} pacienteById={pacienteById} titulo="Quién vino esta semana y cuántas veces" />
+      <RegistroTabla filas={filtrados} pacienteById={pacienteById} onEditar={onEditar} onEliminar={onEliminar} vacioTexto={q ? "No hay registros de ese paciente esta semana." : 'No hay registros cargados esta semana. Cargá el primero con "Nuevo registro".'} />
     </div>
   );
 }
 
 function RegistroMesView({ registros, pacientes, pacienteById, onEditar, onEliminar }) {
   const [mes, setMes] = useState(todayISO().slice(0, 7));
+  const [q, setQ] = useState("");
 
   const delMes = useMemo(
     () => registros.filter((r) => r.fecha.slice(0, 7) === mes).sort((a, b) => b.fecha.localeCompare(a.fecha)),
     [registros, mes]
+  );
+
+  const filtrados = useMemo(
+    () => delMes.filter((r) => (pacienteById(r.pacienteId)?.nombre || "").toLowerCase().includes(q.toLowerCase())),
+    [delMes, q, pacientes]
   );
 
   return (
@@ -1233,12 +1250,17 @@ function RegistroMesView({ registros, pacientes, pacienteById, onEditar, onElimi
       <div className="panel" style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
         <Field label="Mes"><input type="month" value={mes} onChange={(e) => setMes(e.target.value)} /></Field>
         <div style={{ marginLeft: "auto" }}>
-          <Btn variant="ghost" small onClick={() => descargarExcelRegistros(delMes, pacienteById, `registro-diario-mes-KSC-${mes}.xlsx`)}><FileDown size={13} /> Descargar Excel</Btn>
+          <Btn variant="ghost" small onClick={() => descargarExcelRegistros(filtrados, pacienteById, `registro-diario-mes-KSC-${mes}.xlsx`)}><FileDown size={13} /> Descargar Excel</Btn>
         </div>
       </div>
 
-      <RegistroResumenPorPaciente filas={delMes} pacienteById={pacienteById} titulo="Quién vino este mes y cuántas veces" />
-      <RegistroTabla filas={delMes} pacienteById={pacienteById} onEditar={onEditar} onEliminar={onEliminar} vacioTexto={'No hay registros cargados este mes.'} />
+      <div className="panel" style={{ padding: "10px 16px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10 }}>
+        <Search size={16} color="#A89D8C" />
+        <input type="text" placeholder="Buscar por nombre de paciente…" value={q} onChange={(e) => setQ(e.target.value)} style={{ border: "none", fontSize: 14, fontFamily: "'IBM Plex Sans',sans-serif" }} />
+      </div>
+
+      <RegistroResumenPorPaciente filas={filtrados} pacienteById={pacienteById} titulo="Quién vino este mes y cuántas veces" />
+      <RegistroTabla filas={filtrados} pacienteById={pacienteById} onEditar={onEditar} onEliminar={onEliminar} vacioTexto={q ? "No hay registros de ese paciente este mes." : "No hay registros cargados este mes."} />
     </div>
   );
 }
