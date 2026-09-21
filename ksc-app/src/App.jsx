@@ -78,7 +78,28 @@ const PROFESIONALES = ["Santiago Remon", "Franco Tosi", "Franco Gutierrez", "Seb
 const ACTIVIDADES = ["Osteopatía", "Kinefilaxia", "Recovery"];
 const FUENTES_CONTACTO = ["Instagram", "Facebook", "Google", "Recomendación de un paciente", "Recomendación de un profesional", "Derivación de Santiago", "KSC Fitness", "Pasó por la puerta", "Otro"];
 const TIPOS_PAGO = ["Individual", "Mensual"];
-const TIPOS_SERVICIO = ["Entrenamiento/Readaptación", "Rehabilitaciones", "Sesión personal de kinesiología", "Terapia manual", "Otro"];
+const TIPOS_SERVICIO = ["Readaptación/Gimnasia Kinésica", "Rehabilitación Premium", "Sesión personal de kinesiología", "Terapia manual", "Osteopatía"];
+const OBRAS_SOCIALES = ["Avalian", "Federada", "Sancor", "Prevención", "Jerárquicos", "Swiss Medical", "Ciencias Económicas", "Caja Forense", "Otra"];
+
+// Precios de referencia. null = sin monto sugerido (se carga a mano).
+const PRECIOS_SERVICIO = {
+  "Readaptación/Gimnasia Kinésica": [
+    { modalidad: "2 veces por semana", particular: 150000, obraSocial: 120000 },
+    { modalidad: "3 veces por semana", particular: 200000, obraSocial: 170000 },
+    { modalidad: "Sesión aislada", particular: 25000, obraSocial: null },
+  ],
+  "Rehabilitación Premium": [
+    { modalidad: "2 veces por semana", particular: 200000, obraSocial: 170000 },
+    { modalidad: "10 sesiones", particular: 250000, obraSocial: 220000 },
+  ],
+  "Sesión personal de kinesiología": [
+    { modalidad: "1 hora", particular: 25000, obraSocial: 20000 },
+  ],
+  "Terapia manual": [
+    { modalidad: "Sesión", particular: 45000, obraSocial: null },
+  ],
+  "Osteopatía": [],
+};
 const HORARIOS_ASISTENCIA = ["Mañana", "Mediodía", "Tarde"];
 const MOTIVOS = ["Primera consulta", "Control", "Tratamiento", "Revisión", "Otro"];
 const ESTADOS = ["Pendiente", "Confirmado", "Cancelado", "Atendido"];
@@ -1656,7 +1677,7 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
               <div className="empty-state">No hay cobros registrados en este mes.</div>
             ) : (
               <table>
-                <thead><tr><th>Fecha</th><th>Paciente</th><th>Tipo de servicio</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Paciente</th><th>Tipo de servicio</th><th>Obra social</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th></tr></thead>
                 <tbody>
                   {delMes.map((c) => {
                     const pac = pacientes.find((p) => p.id === c.pacienteId);
@@ -1665,6 +1686,7 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
                         <td>{fmtDate(c.fecha)}</td>
                         <td>{pac ? pac.nombre : "—"}</td>
                         <td>{c.tipoServicio ? <Badge tone="clay">{c.tipoServicio}</Badge> : "—"}</td>
+                        <td>{c.obraSocial ? <Badge tone="sage">{c.obraSocial}</Badge> : "Particular"}</td>
                         <td>{c.concepto}</td>
                         <td><Badge tone="sage">{c.metodo}</Badge></td>
                         <td style={{ fontWeight: 600 }}>{fmtMoney(c.monto)}</td>
@@ -2014,10 +2036,28 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
   const [pacienteId, setPacienteId] = useState("");
   const [concepto, setConcepto] = useState("Consulta");
   const [tipoServicio, setTipoServicio] = useState(TIPOS_SERVICIO[0]);
+  const [modalidad, setModalidad] = useState(PRECIOS_SERVICIO[TIPOS_SERVICIO[0]][0]?.modalidad || "");
+  const [obraSocial, setObraSocial] = useState("");
+  const [obraSocialOtra, setObraSocialOtra] = useState("");
   const [monto, setMonto] = useState("");
   const [metodo, setMetodo] = useState(METODOS_PAGO[0]);
   const [fecha, setFecha] = useState(todayISO());
   const [tipoPago, setTipoPago] = useState(TIPOS_PAGO[0]);
+
+  const modalidades = PRECIOS_SERVICIO[tipoServicio] || [];
+  const modalidadActual = modalidades.find((m) => m.modalidad === modalidad) || modalidades[0] || null;
+  const tieneObraSocial = obraSocial !== "";
+  const montoSugerido = modalidadActual
+    ? (tieneObraSocial && modalidadActual.obraSocial != null ? modalidadActual.obraSocial : modalidadActual.particular)
+    : null;
+
+  const cambiarTipoServicio = (nuevoTipo) => {
+    setTipoServicio(nuevoTipo);
+    const nuevasModalidades = PRECIOS_SERVICIO[nuevoTipo] || [];
+    setModalidad(nuevasModalidades[0]?.modalidad || "");
+  };
+
+  const nombreObraSocial = obraSocial === "Otra" ? obraSocialOtra.trim() : obraSocial;
 
   return (
     <>
@@ -2025,13 +2065,49 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
         <PatientPicker pacientes={pacientes} value={pacienteId} onChange={setPacienteId} onCreateNew={onCreatePaciente} />
       </Field>
       <Field label="Tipo de servicio">
-        <select value={tipoServicio} onChange={(e) => setTipoServicio(e.target.value)}>
+        <select value={tipoServicio} onChange={(e) => cambiarTipoServicio(e.target.value)}>
           {TIPOS_SERVICIO.map((s) => <option key={s}>{s}</option>)}
         </select>
       </Field>
+
+      {modalidades.length > 0 && (
+        <Field label="Modalidad">
+          <select value={modalidad} onChange={(e) => setModalidad(e.target.value)}>
+            {modalidades.map((m) => <option key={m.modalidad}>{m.modalidad}</option>)}
+          </select>
+        </Field>
+      )}
+
+      <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <Field label="Obra social">
+            <select value={obraSocial} onChange={(e) => setObraSocial(e.target.value)}>
+              <option value="">Particular (sin obra social)</option>
+              {OBRAS_SOCIALES.map((o) => <option key={o}>{o}</option>)}
+            </select>
+          </Field>
+        </div>
+        {obraSocial === "Otra" && (
+          <div style={{ flex: 1 }}>
+            <Field label="¿Cuál?"><input type="text" value={obraSocialOtra} onChange={(e) => setObraSocialOtra(e.target.value)} placeholder="Nombre de la obra social" /></Field>
+          </div>
+        )}
+      </div>
+
       <Field label="Concepto"><input type="text" value={concepto} onChange={(e) => setConcepto(e.target.value)} /></Field>
       <div style={{ display: "flex", gap: 12 }}>
-        <div style={{ flex: 1 }}><Field label="Monto (ARS)"><input type="number" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0" /></Field></div>
+        <div style={{ flex: 1 }}>
+          <Field label="Monto (ARS)"><input type="number" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0" /></Field>
+          {montoSugerido != null && (
+            <button
+              type="button"
+              onClick={() => setMonto(String(montoSugerido))}
+              style={{ background: "#F1DDC9", color: "#8A4E1F", border: "none", borderRadius: 3, padding: "6px 10px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", marginTop: -8, marginBottom: 14, display: "inline-block" }}
+            >
+              Sugerido: {fmtMoney(montoSugerido)} · usar este monto
+            </button>
+          )}
+        </div>
         <div style={{ flex: 1 }}><Field label="Fecha"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field></div>
       </div>
       <div style={{ display: "flex", gap: 12 }}>
@@ -2057,7 +2133,7 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
       )}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn variant="primary" onClick={() => monto && pacienteId && onSave({ pacienteId, concepto, tipoServicio, monto: Number(monto), metodo, fecha, tipoPago })}>Guardar cobro</Btn>
+        <Btn variant="primary" onClick={() => monto && pacienteId && onSave({ pacienteId, concepto, tipoServicio, modalidad, obraSocial: nombreObraSocial, monto: Number(monto), metodo, fecha, tipoPago })}>Guardar cobro</Btn>
       </div>
     </>
   );
