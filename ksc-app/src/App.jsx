@@ -84,11 +84,13 @@ const OBRAS_SOCIALES = ["Avalian", "Federada", "Sancor", "Prevención", "Jerárq
 // Precios de referencia. null = sin monto sugerido (se carga a mano).
 const PRECIOS_SERVICIO = {
   "Readaptación/Gimnasia Kinésica": [
+    { modalidad: "1 vez por semana", particular: 100000, obraSocial: null },
     { modalidad: "2 veces por semana", particular: 150000, obraSocial: 120000 },
     { modalidad: "3 veces por semana", particular: 200000, obraSocial: 170000 },
     { modalidad: "Sesión aislada", particular: 25000, obraSocial: null },
   ],
   "Rehabilitación Premium": [
+    { modalidad: "1 vez por semana", particular: 100000, obraSocial: null },
     { modalidad: "2 veces por semana", particular: 200000, obraSocial: 170000 },
     { modalidad: "10 sesiones", particular: 250000, obraSocial: 220000 },
   ],
@@ -100,6 +102,17 @@ const PRECIOS_SERVICIO = {
   ],
   "Osteopatía": [],
 };
+// Servicios en los que el paciente tiene un "tratamiento" fijo con una frecuencia
+// semanal (1, 2 o 3 veces). Para estos dos, ese dato se carga en la ficha del
+// paciente y se recuerda solo al registrar un cobro. Terapia manual y Sesión
+// personal de kinesiología se eligen a mano en cada cobro, no se guardan en el paciente.
+const TRATAMIENTOS_CON_FRECUENCIA = ["Readaptación/Gimnasia Kinésica", "Rehabilitación Premium"];
+const FRECUENCIAS_SEMANALES = [1, 2, 3];
+function modalidadPorFrecuencia(n) {
+  const num = Number(n);
+  if (!num) return "";
+  return `${num} ${num === 1 ? "vez" : "veces"} por semana`;
+}
 const HORARIOS_ASISTENCIA = ["Mañana", "Mediodía", "Tarde"];
 const MOTIVOS = ["Primera consulta", "Control", "Tratamiento", "Revisión", "Otro"];
 const ESTADOS = ["Pendiente", "Confirmado", "Cancelado", "Atendido"];
@@ -1489,6 +1502,8 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
   const [fechaIngreso, setFechaIngreso] = useState(initial.fechaIngreso || "");
   const [horario, setHorario] = useState(initial.horario || "");
   const [ultimoPagoManual, setUltimoPagoManual] = useState(initial.ultimoPagoManual || "");
+  const [tratamientoActual, setTratamientoActual] = useState(initial.tratamientoActual || "");
+  const [frecuenciaSemanal, setFrecuenciaSemanal] = useState(initial.frecuenciaSemanal || "");
 
   return (
     <Modal title={title} onClose={onClose}>
@@ -1518,6 +1533,26 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
       <Field label="Notas / antecedentes"><textarea rows={3} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Alergias, observaciones, preferencias…" /></Field>
 
       <div style={{ background: "#F2ECDE", border: "1px solid #E9E1D3", borderRadius: 3, padding: "12px 14px", marginBottom: 14 }}>
+        <Field label="Tratamiento actual">
+          <select value={tratamientoActual} onChange={(e) => { setTratamientoActual(e.target.value); if (!TRATAMIENTOS_CON_FRECUENCIA.includes(e.target.value)) setFrecuenciaSemanal(""); }}>
+            <option value="">No aplica / se elige en cada cobro</option>
+            {TRATAMIENTOS_CON_FRECUENCIA.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </Field>
+        {TRATAMIENTOS_CON_FRECUENCIA.includes(tratamientoActual) && (
+          <Field label="¿Cuántas veces por semana asiste?">
+            <select value={frecuenciaSemanal} onChange={(e) => setFrecuenciaSemanal(e.target.value)}>
+              <option value="">Sin especificar</option>
+              {FRECUENCIAS_SEMANALES.map((n) => <option key={n} value={n}>{n} {n === 1 ? "vez" : "veces"} por semana</option>)}
+            </select>
+          </Field>
+        )}
+        <p style={{ fontSize: 12, color: "#7C7264", margin: 0, lineHeight: 1.5 }}>
+          Con este dato, al registrar un cobro para este paciente la app va a recordar el tratamiento y la frecuencia, y sugerir el monto mensual correspondiente. Para Terapia manual o Sesión personal de kinesiología no hace falta cargar nada acá: se eligen directamente al registrar el cobro.
+        </p>
+      </div>
+
+      <div style={{ background: "#F2ECDE", border: "1px solid #E9E1D3", borderRadius: 3, padding: "12px 14px", marginBottom: 14 }}>
         <Field label="Fecha del último pago de mensualidad (opcional)">
           <input type="date" value={ultimoPagoManual} onChange={(e) => setUltimoPagoManual(e.target.value)} />
         </Field>
@@ -1531,7 +1566,11 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
         <Btn variant="primary" onClick={() => {
           if (!nombre.trim()) return;
-          const datos = { nombre: nombre.trim(), telefono, email, nacimiento, notas, comoConocio, fechaIngreso, horario, ultimoPagoManual };
+          const datos = {
+            nombre: nombre.trim(), telefono, email, nacimiento, notas, comoConocio, fechaIngreso, horario, ultimoPagoManual,
+            tratamientoActual,
+            frecuenciaSemanal: TRATAMIENTOS_CON_FRECUENCIA.includes(tratamientoActual) && frecuenciaSemanal ? Number(frecuenciaSemanal) : "",
+          };
           if (ultimoPagoManual) {
             datos.planPago = "Mensual";
             datos.vencimientoMensualidad = addMonths(ultimoPagoManual, 1);
@@ -1577,6 +1616,9 @@ function FichaPacienteModal({ paciente, turnos, onClose, onUpdate, onDelete }) {
         {paciente.comoConocio && <InfoLine icon={<MessageCircle size={14} />} text={`Nos conoció por: ${paciente.comoConocio}`} />}
         {paciente.fechaIngreso && <InfoLine icon={<Calendar size={14} />} text={`Ingresó el ${fmtDate(paciente.fechaIngreso)}`} />}
         {paciente.horario && <InfoLine icon={<Clock size={14} />} text={`Asiste de ${paciente.horario.toLowerCase()}`} />}
+        {paciente.tratamientoActual && (
+          <InfoLine icon={<ClipboardList size={14} />} text={`${paciente.tratamientoActual}${paciente.frecuenciaSemanal ? ` · ${modalidadPorFrecuencia(paciente.frecuenciaSemanal)}` : ""}`} />
+        )}
       </div>
       {estadoMensualidad(paciente) && (
         <div style={{
@@ -2133,6 +2175,23 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
   const [metodo, setMetodo] = useState(METODOS_PAGO[0]);
   const [fecha, setFecha] = useState(todayISO());
   const [tipoPago, setTipoPago] = useState(TIPOS_PAGO[0]);
+  const [precargado, setPrecargado] = useState(false);
+
+  useEffect(() => {
+    const p = pacientes.find((x) => x.id === pacienteId);
+    if (p && TRATAMIENTOS_CON_FRECUENCIA.includes(p.tratamientoActual)) {
+      setTipoServicio(p.tratamientoActual);
+      const mods = PRECIOS_SERVICIO[p.tratamientoActual] || [];
+      const modBuscada = modalidadPorFrecuencia(p.frecuenciaSemanal);
+      const encontrada = mods.find((m) => m.modalidad === modBuscada);
+      setModalidad(encontrada ? encontrada.modalidad : (mods[0]?.modalidad || ""));
+      setTipoPago("Mensual");
+      setPrecargado(true);
+    } else {
+      setPrecargado(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pacienteId]);
 
   const modalidades = PRECIOS_SERVICIO[tipoServicio] || [];
   const modalidadActual = modalidades.find((m) => m.modalidad === modalidad) || modalidades[0] || null;
@@ -2145,6 +2204,7 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
     setTipoServicio(nuevoTipo);
     const nuevasModalidades = PRECIOS_SERVICIO[nuevoTipo] || [];
     setModalidad(nuevasModalidades[0]?.modalidad || "");
+    setPrecargado(false);
   };
 
   const nombreObraSocial = obraSocial === "Otra" ? obraSocialOtra.trim() : obraSocial;
@@ -2159,10 +2219,15 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
           {TIPOS_SERVICIO.map((s) => <option key={s}>{s}</option>)}
         </select>
       </Field>
+      {precargado && (
+        <p style={{ fontSize: 12, color: "#7C7264", margin: "-8px 0 14px", lineHeight: 1.5 }}>
+          Precargado según los datos del paciente. Podés cambiarlo si esta vez es distinto.
+        </p>
+      )}
 
       {modalidades.length > 0 && (
         <Field label="Modalidad">
-          <select value={modalidad} onChange={(e) => setModalidad(e.target.value)}>
+          <select value={modalidad} onChange={(e) => { setModalidad(e.target.value); setPrecargado(false); }}>
             {modalidades.map((m) => <option key={m.modalidad}>{m.modalidad}</option>)}
           </select>
         </Field>
