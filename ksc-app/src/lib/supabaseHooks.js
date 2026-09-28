@@ -257,6 +257,7 @@ export const mapCobros = {
     metodo: c.metodo,
     fecha: c.fecha,
     tipo_pago: c.tipoPago || "Individual",
+    observaciones: c.observaciones || "",
   }),
   fromRow: (r) => ({
     id: r.id,
@@ -269,6 +270,7 @@ export const mapCobros = {
     metodo: r.metodo,
     fecha: r.fecha,
     tipoPago: r.tipo_pago || "Individual",
+    observaciones: r.observaciones || "",
   }),
 };
 
