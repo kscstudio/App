@@ -3,7 +3,7 @@ import {
   Calendar, Users, Wallet, Bell, BarChart3, Plus, X, Phone,
   Mail, Search, ChevronLeft, ChevronRight, CalendarPlus,
   MessageCircle, Check, Trash2, Clock, AlertTriangle, Download, FileDown,
-  LogOut, KeyRound, ShieldCheck, Lock, User as UserIcon, Menu, ClipboardList, Pencil
+  LogOut, KeyRound, ShieldCheck, Lock, User as UserIcon, Menu, ClipboardList, Pencil, StickyNote
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -1697,9 +1697,14 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
   const [showNew, setShowNew] = useState(false);
   const [mesFiltro, setMesFiltro] = useState(todayISO().slice(0, 7));
   const [tab, setTab] = useState("mes");
+  const [notaCobro, setNotaCobro] = useState(null);
 
   const delMes = cobros.filter((c) => c.fecha.slice(0, 7) === mesFiltro).sort((a, b) => b.fecha.localeCompare(a.fecha));
   const totalMes = delMes.reduce((acc, c) => acc + Number(c.monto || 0), 0);
+  const guardarObservaciones = (id, texto) => {
+    setCobros(cobros.map((c) => (c.id === id ? { ...c, observaciones: texto } : c)));
+    setNotaCobro(null);
+  };
   const addCobro = (c) => {
     setCobros([...cobros, { id: uid(), ...c }]);
     if (c.tipoPago === "Mensual") {
@@ -1749,10 +1754,11 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
               <div className="empty-state">No hay cobros registrados en este mes.</div>
             ) : (
               <table>
-                <thead><tr><th>Fecha</th><th>Paciente</th><th>Tipo de servicio</th><th>Obra social</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Paciente</th><th>Tipo de servicio</th><th>Obra social</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th><th></th></tr></thead>
                 <tbody>
                   {delMes.map((c) => {
                     const pac = pacientes.find((p) => p.id === c.pacienteId);
+                    const tieneNota = !!(c.observaciones && c.observaciones.trim());
                     return (
                       <tr key={c.id}>
                         <td>{fmtDate(c.fecha)}</td>
@@ -1762,6 +1768,16 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
                         <td>{c.concepto}</td>
                         <td><Badge tone="sage">{c.metodo}</Badge></td>
                         <td style={{ fontWeight: 600 }}>{fmtMoney(c.monto)}</td>
+                        <td>
+                          <button
+                            className="icon-btn"
+                            onClick={() => setNotaCobro(c)}
+                            title={tieneNota ? "Ver / editar observaciones" : "Agregar observaciones"}
+                            style={tieneNota ? { color: "#8C5A34" } : undefined}
+                          >
+                            <StickyNote size={15} fill={tieneNota ? "#F1DDC9" : "none"} />
+                          </button>
+                        </td>
                         <td><button className="icon-btn" onClick={() => delCobro(c.id)}><Trash2 size={15} /></button></td>
                       </tr>
                     );
@@ -1784,7 +1800,35 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
           <NuevoCobroForm pacientes={pacientes} onCreatePaciente={crearPacienteRapido} turnos={turnos} onSave={(c) => { addCobro(c); setShowNew(false); }} onClose={() => setShowNew(false)} />
         </Modal>
       )}
+      {notaCobro && (
+        <ObservacionesCobroModal cobro={notaCobro} pacientes={pacientes} onSave={guardarObservaciones} onClose={() => setNotaCobro(null)} />
+      )}
     </div>
+  );
+}
+
+function ObservacionesCobroModal({ cobro, pacientes, onSave, onClose }) {
+  const [texto, setTexto] = useState(cobro.observaciones || "");
+  const pac = pacientes.find((p) => p.id === cobro.pacienteId);
+  return (
+    <Modal title="Observaciones del cobro" onClose={onClose}>
+      <p style={{ color: "#A89D8C", fontSize: 13.5, margin: "-4px 0 8px" }}>
+        {pac ? pac.nombre : "—"} · {fmtDate(cobro.fecha)} · {fmtMoney(cobro.monto)}
+      </p>
+      <Field label="Anotaciones">
+        <textarea
+          rows={5}
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          placeholder="Ej: pagó en dos partes, quedó pendiente $5.000, etc."
+          autoFocus
+        />
+      </Field>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="primary" onClick={() => onSave(cobro.id, texto)}>Guardar</Btn>
+      </div>
+    </Modal>
   );
 }
 
