@@ -120,6 +120,11 @@ function modalidadPorFrecuencia(n) {
   if (!num) return "";
   return `${num} ${num === 1 ? "vez" : "veces"} por semana`;
 }
+// Las modalidades "N vez/veces por semana" son siempre un plan mensual recurrente
+// (a diferencia de "Sesión aislada", "10 sesiones", etc., que son pagos sueltos).
+function esModalidadMensual(modalidad) {
+  return /por semana$/.test(modalidad || "");
+}
 const HORARIOS_ASISTENCIA = ["Mañana", "Mediodía", "Tarde"];
 const MOTIVOS = ["Primera consulta", "Control", "Tratamiento", "Revisión", "Otro"];
 const ESTADOS = ["Pendiente", "Confirmado", "Cancelado", "Atendido"];
@@ -1332,6 +1337,17 @@ function NuevoRegistroModal({ pacientes, onCreatePacienteCompleto, onClose, onSa
           </span>
         </div>
       )}
+      {pacienteSeleccionado && !mensualidad && (
+        <div style={{
+          background: "#EFEAE0", color: "#7C7264",
+          padding: "10px 12px", fontSize: 13, marginBottom: 14, borderRadius: 3, display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <ClipboardList size={15} style={{ flexShrink: 0 }} />
+          <span>
+            {pacienteSeleccionado.nombre} no tiene una mensualidad en seguimiento. Si abona por mes, registrá un cobro con "¿Individual o mensualidad?" en <strong>Mensual</strong> (o cargá su fecha de último pago desde su ficha) para que acá aparezca el aviso de vencimiento.
+          </span>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 12 }}>
         <div style={{ flex: 1 }}><Field label="Fecha"><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field></div>
@@ -2261,7 +2277,7 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
   const [monto, setMonto] = useState("");
   const [metodo, setMetodo] = useState(METODOS_PAGO[0]);
   const [fecha, setFecha] = useState(todayISO());
-  const [tipoPago, setTipoPago] = useState(TIPOS_PAGO[0]);
+  const [tipoPago, setTipoPago] = useState(() => (esModalidadMensual(PRECIOS_SERVICIO[TIPOS_SERVICIO[0]][0]?.modalidad) ? "Mensual" : "Individual"));
   const [precargado, setPrecargado] = useState(false);
 
   useEffect(() => {
@@ -2290,7 +2306,9 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
   const cambiarTipoServicio = (nuevoTipo) => {
     setTipoServicio(nuevoTipo);
     const nuevasModalidades = PRECIOS_SERVICIO[nuevoTipo] || [];
-    setModalidad(nuevasModalidades[0]?.modalidad || "");
+    const nuevaModalidad = nuevasModalidades[0]?.modalidad || "";
+    setModalidad(nuevaModalidad);
+    setTipoPago(esModalidadMensual(nuevaModalidad) ? "Mensual" : "Individual");
     setPrecargado(false);
   };
 
@@ -2314,7 +2332,7 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
 
       {modalidades.length > 0 && (
         <Field label="Modalidad">
-          <select value={modalidad} onChange={(e) => { setModalidad(e.target.value); setPrecargado(false); }}>
+          <select value={modalidad} onChange={(e) => { setModalidad(e.target.value); setTipoPago(esModalidadMensual(e.target.value) ? "Mensual" : "Individual"); setPrecargado(false); }}>
             {modalidades.map((m) => <option key={m.modalidad}>{m.modalidad}</option>)}
           </select>
         </Field>
@@ -2368,9 +2386,13 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
           </Field>
         </div>
       </div>
-      {tipoPago === "Mensual" && (
+      {tipoPago === "Mensual" ? (
         <p style={{ fontSize: 12.5, color: "#7C7264", margin: "-8px 0 14px", lineHeight: 1.5 }}>
           Al guardar, la ficha del paciente va a mostrar que su mensualidad vence el {fmtDate(addMonths(fecha, 1))}, y todo el equipo va a ver ese aviso al registrar su ingreso.
+        </p>
+      ) : (
+        <p style={{ fontSize: 12.5, color: "#7C7264", margin: "-8px 0 14px", lineHeight: 1.5 }}>
+          Con "Individual" este pago no queda en seguimiento de vencimiento mensual. Si en realidad abona por mes, cambiá esta opción a "Mensual".
         </p>
       )}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
