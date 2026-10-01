@@ -45,11 +45,18 @@ const diasEntre = (desdeISO, hastaISO) => {
   const b = new Date(hastaISO + "T00:00:00");
   return Math.round((b - a) / 86400000);
 };
-// Estado de la mensualidad de un paciente, a partir de los campos guardados en su ficha.
+// Estado de la mensualidad de un paciente, a partir de los campos guardados en su ficha
+// (da lo mismo si esa fecha se cargó a mano en "último pago manual" o salió de un
+// cobro tipo "Mensual" en la sección Cobros: ambos caminos terminan guardando
+// planPago/vencimientoMensualidad en el paciente, así que este cálculo es el mismo).
+const UMBRAL_PROXIMO_A_VENCER = 5; // días
 function estadoMensualidad(paciente) {
   if (!paciente || paciente.planPago !== "Mensual" || !paciente.vencimientoMensualidad) return null;
   const dias = diasEntre(todayISO(), paciente.vencimientoMensualidad);
-  return { vencimiento: paciente.vencimientoMensualidad, dias };
+  const estado = dias < 0 ? "vencido" : dias <= UMBRAL_PROXIMO_A_VENCER ? "proximo" : "al_dia";
+  const label = estado === "vencido" ? "Vencido" : estado === "proximo" ? "Próximo a vencer" : "Al día";
+  const tone = estado === "vencido" ? "coral" : estado === "proximo" ? "clay" : "sage";
+  return { vencimiento: paciente.vencimientoMensualidad, dias, estado, label, tone };
 }
 const mondayOf = (iso) => {
   const d = new Date(iso + "T00:00:00");
@@ -1308,17 +1315,20 @@ function NuevoRegistroModal({ pacientes, onCreatePacienteCompleto, onClose, onSa
 
       {mensualidad && (
         <div style={{
-          background: mensualidad.dias < 0 ? "#F3D9D6" : mensualidad.dias <= 5 ? "#F1DDC9" : "#EDE6D8",
-          color: mensualidad.dias < 0 ? "#8C2F32" : "#5C5245",
+          background: mensualidad.estado === "vencido" ? "#F3D9D6" : mensualidad.estado === "proximo" ? "#F1DDC9" : "#EDE6D8",
+          color: mensualidad.estado === "vencido" ? "#8C2F32" : "#5C5245",
           padding: "10px 12px", fontSize: 13, marginBottom: 14, borderRadius: 3, display: "flex", alignItems: "center", gap: 8,
         }}>
           <AlertTriangle size={15} style={{ flexShrink: 0 }} />
-          <span>
-            {mensualidad.dias < 0
-              ? `Ojo: la mensualidad de ${pacienteSeleccionado.nombre} venció hace ${Math.abs(mensualidad.dias)} día(s) (el ${fmtDate(mensualidad.vencimiento)}).`
-              : mensualidad.dias <= 5
-              ? `La mensualidad de ${pacienteSeleccionado.nombre} vence en ${mensualidad.dias} día(s), el ${fmtDate(mensualidad.vencimiento)}. Aprovechá para avisarle.`
-              : `Mensualidad vigente hasta el ${fmtDate(mensualidad.vencimiento)}.`}
+          <span style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <Badge tone={mensualidad.tone}>{mensualidad.label}</Badge>
+            <span>
+              {mensualidad.estado === "vencido"
+                ? `La mensualidad de ${pacienteSeleccionado.nombre} venció hace ${Math.abs(mensualidad.dias)} día(s) (el ${fmtDate(mensualidad.vencimiento)}).`
+                : mensualidad.estado === "proximo"
+                ? `La mensualidad de ${pacienteSeleccionado.nombre} vence en ${mensualidad.dias} día(s), el ${fmtDate(mensualidad.vencimiento)}. Aprovechá para avisarle.`
+                : `Mensualidad al día, vence el ${fmtDate(mensualidad.vencimiento)} (en ${mensualidad.dias} día(s)).`}
+            </span>
           </span>
         </div>
       )}
@@ -1505,8 +1515,24 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
   const [tratamientoActual, setTratamientoActual] = useState(initial.tratamientoActual || "");
   const [frecuenciaSemanal, setFrecuenciaSemanal] = useState(initial.frecuenciaSemanal || "");
 
+  const mensualidadActual = estadoMensualidad(initial);
+
   return (
     <Modal title={title} onClose={onClose}>
+      {mensualidadActual && (
+        <div style={{
+          background: mensualidadActual.estado === "vencido" ? "#F3D9D6" : mensualidadActual.estado === "proximo" ? "#F1DDC9" : "#EDE6D8",
+          color: mensualidadActual.estado === "vencido" ? "#8C2F32" : "#5C5245",
+          padding: "10px 12px", fontSize: 13, marginBottom: 16, borderRadius: 3, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+        }}>
+          <Badge tone={mensualidadActual.tone}>{mensualidadActual.label}</Badge>
+          <span>
+            {mensualidadActual.estado === "vencido"
+              ? `Mensualidad vencida hace ${Math.abs(mensualidadActual.dias)} día(s) (vencía el ${fmtDate(mensualidadActual.vencimiento)})`
+              : `Mensualidad vence el ${fmtDate(mensualidadActual.vencimiento)} (en ${mensualidadActual.dias} día(s))`}
+          </span>
+        </div>
+      )}
       <Field label="Nombre completo"><input type="text" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre y apellido" /></Field>
       <div style={{ display: "flex", gap: 12 }}>
         <div style={{ flex: 1 }}><Field label="Teléfono (WhatsApp)"><input type="tel" value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="+549..." /></Field></div>
@@ -1558,7 +1584,16 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
         </Field>
         <p style={{ fontSize: 12, color: "#7C7264", margin: 0, lineHeight: 1.5 }}>
           Cargá esto solo si el pago se hizo por fuera de la app (por ejemplo, un paciente que ya pagaba antes de empezar a usar Cobros). Calcula sola la fecha de vencimiento (un mes después) para que aparezca el aviso al registrar su ingreso.
-          {ultimoPagoManual && <><br /><strong>Vencería el {fmtDate(addMonths(ultimoPagoManual, 1))}.</strong></>}
+          {ultimoPagoManual && (() => {
+            const venc = addMonths(ultimoPagoManual, 1);
+            const dias = diasEntre(todayISO(), venc);
+            const estado = dias < 0 ? "vencido" : dias <= UMBRAL_PROXIMO_A_VENCER ? "proximo" : "al_dia";
+            const label = estado === "vencido" ? "Vencido" : estado === "proximo" ? "Próximo a vencer" : "Al día";
+            const tone = estado === "vencido" ? "coral" : estado === "proximo" ? "clay" : "sage";
+            return (
+              <><br /><strong>Vencería el {fmtDate(venc)}.</strong> <Badge tone={tone}>{label}</Badge></>
+            );
+          })()}
         </p>
       </div>
 
@@ -1620,17 +1655,25 @@ function FichaPacienteModal({ paciente, turnos, onClose, onUpdate, onDelete }) {
           <InfoLine icon={<ClipboardList size={14} />} text={`${paciente.tratamientoActual}${paciente.frecuenciaSemanal ? ` · ${modalidadPorFrecuencia(paciente.frecuenciaSemanal)}` : ""}`} />
         )}
       </div>
-      {estadoMensualidad(paciente) && (
-        <div style={{
-          background: estadoMensualidad(paciente).dias < 0 ? "#F3D9D6" : estadoMensualidad(paciente).dias <= 5 ? "#F1DDC9" : "#EDE6D8",
-          color: estadoMensualidad(paciente).dias < 0 ? "#8C2F32" : "#5C5245",
-          padding: "10px 12px", fontSize: 13.5, marginBottom: 18, borderRadius: 3,
-        }}>
-          {estadoMensualidad(paciente).dias < 0
-            ? `Mensualidad vencida hace ${Math.abs(estadoMensualidad(paciente).dias)} día(s) (vencía el ${fmtDate(estadoMensualidad(paciente).vencimiento)})`
-            : `Mensualidad vigente, vence el ${fmtDate(estadoMensualidad(paciente).vencimiento)} (en ${estadoMensualidad(paciente).dias} día(s))`}
-        </div>
-      )}
+      {estadoMensualidad(paciente) && (() => {
+        const m = estadoMensualidad(paciente);
+        return (
+          <div style={{
+            background: m.estado === "vencido" ? "#F3D9D6" : m.estado === "proximo" ? "#F1DDC9" : "#EDE6D8",
+            color: m.estado === "vencido" ? "#8C2F32" : "#5C5245",
+            padding: "10px 12px", fontSize: 13.5, marginBottom: 18, borderRadius: 3, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+          }}>
+            <Badge tone={m.tone}>{m.label}</Badge>
+            <span>
+              {m.estado === "vencido"
+                ? `Venció hace ${Math.abs(m.dias)} día(s) (el ${fmtDate(m.vencimiento)})`
+                : m.estado === "proximo"
+                ? `Vence en ${m.dias} día(s), el ${fmtDate(m.vencimiento)}`
+                : `Vence el ${fmtDate(m.vencimiento)} (en ${m.dias} día(s))`}
+            </span>
+          </div>
+        );
+      })()}
       {paciente.notas && (
         <div style={{ background: "#F2ECDE", border: "1px solid #E9E1D3", padding: "10px 12px", fontSize: 13.5, marginBottom: 18, borderRadius: 3 }}>
           <strong>Antecedentes: </strong>{paciente.notas}
@@ -1838,7 +1881,7 @@ function VencimientosView({ pacientes, setPacientes }) {
   const [filtroEstado, setFiltroEstado] = useState("todos");
   const [verPausados, setVerPausados] = useState(false);
 
-  const estadoDe = (dias) => (dias < 0 ? "vencido" : dias <= 5 ? "proximo" : "vigente");
+  const estadoDe = (dias) => (dias < 0 ? "vencido" : dias <= UMBRAL_PROXIMO_A_VENCER ? "proximo" : "al_dia");
 
   const conMensualidad = pacientes
     .filter((p) => p.planPago === "Mensual" && p.vencimientoMensualidad)
@@ -1866,7 +1909,7 @@ function VencimientosView({ pacientes, setPacientes }) {
           <option value="todos">Todos los estados</option>
           <option value="vencido">Vencidos</option>
           <option value="proximo">Próximos a vencer</option>
-          <option value="vigente">Vigentes</option>
+          <option value="al_dia">Al día</option>
         </select>
       </div>
 
@@ -1885,10 +1928,10 @@ function VencimientosView({ pacientes, setPacientes }) {
                   <td>{fmtDate(p.vencimientoMensualidad)}</td>
                   <td>
                     {p.dias < 0
-                      ? <Badge tone="coral">Vencida hace {Math.abs(p.dias)} día(s)</Badge>
-                      : p.dias <= 5
-                      ? <Badge tone="clay">Vence en {p.dias} día(s)</Badge>
-                      : <Badge tone="sage">Vigente ({p.dias} días)</Badge>}
+                      ? <Badge tone="coral">Vencido hace {Math.abs(p.dias)} día(s)</Badge>
+                      : p.dias <= UMBRAL_PROXIMO_A_VENCER
+                      ? <Badge tone="clay">Próximo a vencer · {p.dias} día(s)</Badge>
+                      : <Badge tone="sage">Al día · {p.dias} día(s)</Badge>}
                   </td>
                   <td>
                     <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
