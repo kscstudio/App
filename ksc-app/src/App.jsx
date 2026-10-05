@@ -505,7 +505,7 @@ export default function KSCStudioApp() {
       <main className="content">
         {viewPermitida === "agenda" && <AgendaView turnos={turnos} setTurnos={setTurnos} pacientes={pacientes} setPacientes={setPacientes} pacienteById={pacienteById} />}
         {viewPermitida === "registro" && <RegistroDiarioView registros={registros} setRegistros={setRegistros} pacientes={pacientes} setPacientes={setPacientes} />}
-        {viewPermitida === "pacientes" && <PacientesView pacientes={pacientes} setPacientes={setPacientes} turnos={turnos} />}
+        {viewPermitida === "pacientes" && <PacientesView pacientes={pacientes} setPacientes={setPacientes} turnos={turnos} registros={registros} />}
         {viewPermitida === "cobros" && <CobrosView cobros={cobros} setCobros={setCobros} pacientes={pacientes} setPacientes={setPacientes} turnos={turnos} />}
         {viewPermitida === "seguimiento" && <SeguimientoView pacientes={pacientes} turnos={turnos} contactos={contactos} setContactos={setContactos} />}
         {viewPermitida === "reportes" && <ReportesView turnos={turnos} cobros={cobros} pacientes={pacientes} />}
@@ -1386,7 +1386,7 @@ function NuevoRegistroModal({ pacientes, onCreatePacienteCompleto, onClose, onSa
   );
 }
 
-function PacientesView({ pacientes, setPacientes, turnos }) {
+function PacientesView({ pacientes, setPacientes, turnos, registros = [] }) {
   const [q, setQ] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [selected, setSelectedRaw] = useState(null);
@@ -1466,16 +1466,19 @@ function PacientesView({ pacientes, setPacientes, turnos }) {
           <div className="empty-state">No se encontraron pacientes.</div>
         ) : (
           <table>
-            <thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Últimas visitas</th><th></th></tr></thead>
+            <thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Últimas visitas</th><th>Vino este mes</th><th></th></tr></thead>
             <tbody>
               {filtrados.map((p) => {
                 const visitas = turnos.filter((t) => t.pacienteId === p.id).length;
+                const mesActual = todayISO().slice(0, 7);
+                const vinoMes = registros.filter((r) => r.pacienteId === p.id && (r.fecha || "").slice(0, 7) === mesActual).length;
                 return (
                   <tr key={p.id} style={{ cursor: "pointer" }} onClick={() => setSelected(p)}>
                     <td style={{ fontWeight: 600 }}>{p.nombre}</td>
                     <td>{p.telefono || "—"}</td>
                     <td>{p.email || "—"}</td>
                     <td>{visitas} turno{visitas !== 1 ? "s" : ""}</td>
+                    <td>{vinoMes} vez{vinoMes !== 1 ? "es" : ""}</td>
                     <td>
                       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                         <Btn variant="ghost" small onClick={(e) => { e.stopPropagation(); setSelected(p); }}>Ver ficha</Btn>
@@ -1501,6 +1504,7 @@ function PacientesView({ pacientes, setPacientes, turnos }) {
         <FichaPacienteModal
           paciente={selected}
           turnos={turnos.filter((t) => t.pacienteId === selected.id)}
+          registros={registros.filter((r) => r.pacienteId === selected.id)}
           onClose={() => setSelected(null)}
           onUpdate={(patch) => { updatePaciente(selected.id, patch); setSelected({ ...selected, ...patch }); }}
           onDelete={() => { setSelected(null); setToDelete(selected); }}
@@ -1633,8 +1637,14 @@ function PacienteModal({ title, onClose, onSave, initial = {} }) {
   );
 }
 
-function FichaPacienteModal({ paciente, turnos, onClose, onUpdate, onDelete }) {
+function FichaPacienteModal({ paciente, turnos, registros = [], onClose, onUpdate, onDelete }) {
   const [editando, setEditando] = useState(false);
+  const [verTodosMeses, setVerTodosMeses] = useState(false);
+  const asistenciasPorMes = useMemo(() => {
+    const m = {};
+    registros.forEach((r) => { const k = (r.fecha || "").slice(0, 7); if (k) m[k] = (m[k] || 0) + 1; });
+    return Object.entries(m).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [registros]);
   const [fechaNota, setFechaNota] = useState(todayISO());
   const [resumenNota, setResumenNota] = useState("");
 
@@ -1694,6 +1704,28 @@ function FichaPacienteModal({ paciente, turnos, onClose, onUpdate, onDelete }) {
         <div style={{ background: "#F2ECDE", border: "1px solid #E9E1D3", padding: "10px 12px", fontSize: 13.5, marginBottom: 18, borderRadius: 3 }}>
           <strong>Antecedentes: </strong>{paciente.notas}
         </div>
+      )}
+
+      <h4 className="subhead">Asistencias por mes</h4>
+      {asistenciasPorMes.length === 0 ? <p className="muted-text">Todavía no hay ingresos registrados en Registro diario.</p> : (
+        <>
+          <ul className="plain-list">
+            {(verTodosMeses ? asistenciasPorMes : asistenciasPorMes.slice(0, 6)).map(([mes, n]) => (
+              <li key={mes} style={{ display: "flex", justifyContent: "space-between", maxWidth: 320, borderBottom: "1px solid #F0E9DC", paddingBottom: 5 }}>
+                <span style={{ textTransform: "capitalize" }}>{["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"][Number(mes.slice(5, 7)) - 1]} {mes.slice(0, 4)}</span>
+                <strong>{n} vez{n !== 1 ? "es" : ""}</strong>
+              </li>
+            ))}
+          </ul>
+          <p className="muted-text" style={{ marginTop: 8 }}>
+            Total: {registros.length} ingreso{registros.length !== 1 ? "s" : ""}.{" "}
+            {asistenciasPorMes.length > 6 && (
+              <button onClick={() => setVerTodosMeses(!verTodosMeses)} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13, padding: 0 }}>
+                {verTodosMeses ? "Ver menos" : "Ver todos los meses"}
+              </button>
+            )}
+          </p>
+        </>
       )}
 
       <h4 className="subhead">Turnos agendados</h4>
