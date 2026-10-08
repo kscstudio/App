@@ -1789,6 +1789,7 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
   const [mesFiltro, setMesFiltro] = useState(todayISO().slice(0, 7));
   const [tab, setTab] = useState("mes");
   const [notaCobro, setNotaCobro] = useState(null);
+  const [editCobro, setEditCobro] = useState(null);
 
   const delMes = cobros.filter((c) => c.fecha.slice(0, 7) === mesFiltro).sort((a, b) => b.fecha.localeCompare(a.fecha));
   const totalMes = delMes.reduce((acc, c) => acc + Number(c.monto || 0), 0);
@@ -1806,6 +1807,17 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
     }
   };
   const delCobro = (id) => setCobros(cobros.filter((c) => c.id !== id));
+  const guardarEdicionCobro = (c) => {
+    const nuevos = cobros.map((x) => (x.id === c.id ? c : x));
+    setCobros(nuevos);
+    // Si el cobro es mensual, el vencimiento del paciente sale de su último cobro mensual.
+    const mensuales = nuevos.filter((x) => x.pacienteId === c.pacienteId && x.tipoPago === "Mensual");
+    if (mensuales.length) {
+      const ultimo = mensuales.reduce((m, x) => (x.fecha > m ? x.fecha : m), mensuales[0].fecha);
+      setPacientes(pacientes.map((p) => (p.id === c.pacienteId ? { ...p, planPago: "Mensual", vencimientoMensualidad: addMonths(ultimo, 1) } : p)));
+    }
+    setEditCobro(null);
+  };
   const crearPacienteRapido = (nombre) => {
     if (!nombre) return null;
     const nuevo = { id: uid(), nombre, telefono: "", email: "", nacimiento: "", notas: "", historial: [] };
@@ -1845,7 +1857,7 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
               <div className="empty-state">No hay cobros registrados en este mes.</div>
             ) : (
               <table>
-                <thead><tr><th>Fecha</th><th>Paciente</th><th>Tipo de servicio</th><th>Obra social</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th><th></th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Paciente</th><th>Tipo de servicio</th><th>Obra social</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th><th></th><th></th></tr></thead>
                 <tbody>
                   {delMes.map((c) => {
                     const pac = pacientes.find((p) => p.id === c.pacienteId);
@@ -1869,7 +1881,8 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
                             <StickyNote size={15} fill={tieneNota ? "#F1DDC9" : "none"} />
                           </button>
                         </td>
-                        <td><button className="icon-btn" onClick={() => delCobro(c.id)}><Trash2 size={15} /></button></td>
+                        <td><button className="icon-btn" title="Editar cobro" onClick={() => setEditCobro(c)}><Pencil size={15} /></button></td>
+                        <td><button className="icon-btn" title="Eliminar cobro" onClick={() => delCobro(c.id)}><Trash2 size={15} /></button></td>
                       </tr>
                     );
                   })}
@@ -1889,6 +1902,11 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
       {showNew && (
         <Modal title="Registrar cobro" onClose={() => setShowNew(false)}>
           <NuevoCobroForm pacientes={pacientes} onCreatePaciente={crearPacienteRapido} turnos={turnos} onSave={(c) => { addCobro(c); setShowNew(false); }} onClose={() => setShowNew(false)} />
+        </Modal>
+      )}
+      {editCobro && (
+        <Modal title="Editar cobro" onClose={() => setEditCobro(null)}>
+          <NuevoCobroForm initial={editCobro} pacientes={pacientes} onCreatePaciente={crearPacienteRapido} onSave={guardarEdicionCobro} onClose={() => setEditCobro(null)} />
         </Modal>
       )}
       {notaCobro && (
@@ -2299,20 +2317,27 @@ function ReporteMensualView({ cobros, turnos, pacientes }) {
 }
 
 
-function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
-  const [pacienteId, setPacienteId] = useState("");
-  const [concepto, setConcepto] = useState("Consulta");
-  const [tipoServicio, setTipoServicio] = useState(TIPOS_SERVICIO[0]);
-  const [modalidad, setModalidad] = useState(PRECIOS_SERVICIO[TIPOS_SERVICIO[0]][0]?.modalidad || "");
-  const [obraSocial, setObraSocial] = useState("");
-  const [obraSocialOtra, setObraSocialOtra] = useState("");
-  const [monto, setMonto] = useState("");
-  const [metodo, setMetodo] = useState(METODOS_PAGO[0]);
-  const [fecha, setFecha] = useState(todayISO());
-  const [tipoPago, setTipoPago] = useState(() => (esModalidadMensual(PRECIOS_SERVICIO[TIPOS_SERVICIO[0]][0]?.modalidad) ? "Mensual" : "Individual"));
+function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial = null }) {
+  const editando = !!initial;
+  const osInicial = initial?.obraSocial || "";
+  const osEsLista = OBRAS_SOCIALES.includes(osInicial);
+  const [pacienteId, setPacienteId] = useState(initial?.pacienteId || "");
+  const [concepto, setConcepto] = useState(initial ? initial.concepto || "" : "Consulta");
+  const [tipoServicio, setTipoServicio] = useState(initial?.tipoServicio || TIPOS_SERVICIO[0]);
+  const [modalidad, setModalidad] = useState(initial ? initial.modalidad || "" : (PRECIOS_SERVICIO[TIPOS_SERVICIO[0]][0]?.modalidad || ""));
+  const [obraSocial, setObraSocial] = useState(osInicial ? (osEsLista ? osInicial : "Otra") : "");
+  const [obraSocialOtra, setObraSocialOtra] = useState(osInicial && !osEsLista ? osInicial : "");
+  const [monto, setMonto] = useState(initial ? String(initial.monto ?? "") : "");
+  const [metodo, setMetodo] = useState(initial?.metodo || METODOS_PAGO[0]);
+  const [fecha, setFecha] = useState(initial?.fecha || todayISO());
+  const [tipoPago, setTipoPago] = useState(() => (initial ? initial.tipoPago || "Individual" : (esModalidadMensual(PRECIOS_SERVICIO[TIPOS_SERVICIO[0]][0]?.modalidad) ? "Mensual" : "Individual")));
   const [precargado, setPrecargado] = useState(false);
+  const primeraVez = useRef(true);
 
   useEffect(() => {
+    // Al editar un cobro existente, no pisamos sus datos con los del paciente.
+    if (editando && primeraVez.current) { primeraVez.current = false; return; }
+    primeraVez.current = false;
     const p = pacientes.find((x) => x.id === pacienteId);
     if (p && TRATAMIENTOS_CON_FRECUENCIA.includes(p.tratamientoActual)) {
       setTipoServicio(p.tratamientoActual);
@@ -2429,7 +2454,7 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose }) {
       )}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn variant="primary" onClick={() => monto && pacienteId && onSave({ pacienteId, concepto, tipoServicio, modalidad, obraSocial: nombreObraSocial, monto: Number(monto), metodo, fecha, tipoPago })}>Guardar cobro</Btn>
+        <Btn variant="primary" onClick={() => monto && pacienteId && onSave({ ...(initial || {}), pacienteId, concepto, tipoServicio, modalidad, obraSocial: nombreObraSocial, monto: Number(monto), metodo, fecha, tipoPago })}>{editando ? "Guardar cambios" : "Guardar cobro"}</Btn>
       </div>
     </>
   );
