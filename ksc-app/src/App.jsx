@@ -50,6 +50,40 @@ const diasEntre = (desdeISO, hastaISO) => {
 // cobro tipo "Mensual" en la sección Cobros: ambos caminos terminan guardando
 // planPago/vencimientoMensualidad en el paciente, así que este cálculo es el mismo).
 const UMBRAL_PROXIMO_A_VENCER = 5; // días
+
+// ---- Profesionales ----
+// Lista de profesionales para filtros: los de la lista fija + cualquiera que aparezca en los datos.
+function listaProfesionales(filas) {
+  const extra = [...new Set((filas || []).map((f) => f.profesional).filter(Boolean))].filter((x) => !PROFESIONALES.includes(x));
+  return [...PROFESIONALES, ...extra];
+}
+function coincideProfesional(fila, filtro) {
+  if (filtro === "todos") return true;
+  if (filtro === SIN_PROFESIONAL) return !fila.profesional;
+  return fila.profesional === filtro;
+}
+
+// ---- Pago por sesiones ----
+// Un cobro "Por sesiones" suma sesiones pagas (cantidadSesiones). Cada ingreso cargado
+// en Registro diario con tipo "Por sesiones" descuenta una. El saldo se calcula siempre
+// a partir de esos dos datos, así que si se edita o borra un cobro o un registro,
+// el saldo se corrige solo.
+function estadoSesiones(pacienteId, cobros, registros, excluirRegistroId = null) {
+  const cobrosPac = (cobros || []).filter((c) => c.pacienteId === pacienteId);
+  const packs = cobrosPac.filter((c) => c.tipoPago === TIPO_SESIONES);
+  const compradas = packs.reduce((a, c) => a + (Number(c.cantidadSesiones) || 0), 0);
+  if (!compradas) return null;
+  const usadas = (registros || []).filter((r) => r.pacienteId === pacienteId && r.tipo === TIPO_SESIONES && r.id !== excluirRegistroId).length;
+  const restantes = compradas - usadas;
+  const ultimaFecha = cobrosPac.reduce((m, c) => (c.fecha > m ? c.fecha : m), "");
+  const ultimoEsPack = cobrosPac.some((c) => c.fecha === ultimaFecha && c.tipoPago === TIPO_SESIONES);
+  const estado = restantes <= 0 ? "vencido" : restantes === 1 ? "proximo" : "al_dia";
+  const label = restantes <= 0 ? "Sin sesiones" : restantes === 1 ? "Le queda 1 sesión" : "Al día";
+  const tone = estado === "vencido" ? "coral" : estado === "proximo" ? "clay" : "sage";
+  // Se sigue mostrando mientras le queden sesiones o si su último pago fue por sesiones.
+  const vigente = restantes > 0 || ultimoEsPack;
+  return { compradas, usadas, restantes, estado, label, tone, vigente };
+}
 function estadoMensualidad(paciente) {
   if (!paciente || paciente.planPago !== "Mensual" || !paciente.vencimientoMensualidad) return null;
   const dias = diasEntre(todayISO(), paciente.vencimientoMensualidad);
@@ -81,10 +115,12 @@ function csvEscape(v) {
   return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-const PROFESIONALES = ["Santiago Remon", "Franco Tosi", "Franco Gutierrez", "Sebastian Caminio", "Jeremias Aime", "Juan Pablo"];
+const PROFESIONALES = ["Santiago Remon", "Franco Tosi", "Franco Gutierrez", "Sebastian Caminio", "Jeremias Aime", "Juan Pablo", "Tomas Cabezon"];
 const ACTIVIDADES = ["Osteopatía", "Kinefilaxia", "Recovery"];
 const FUENTES_CONTACTO = ["Instagram", "Facebook", "Google", "Recomendación de un paciente", "Recomendación de un profesional", "Derivación de Santiago", "KSC Fitness", "Pasó por la puerta", "Otro"];
-const TIPOS_PAGO = ["Individual", "Mensual"];
+const TIPO_SESIONES = "Por sesiones";
+const TIPOS_PAGO = ["Individual", "Mensual", TIPO_SESIONES];
+const SIN_PROFESIONAL = "Sin asignar";
 const TIPOS_SERVICIO = ["Readaptación/Gimnasia Kinésica", "Rehabilitación Premium", "Sesión personal de kinesiología", "Terapia manual", "Osteopatía"];
 const OBRAS_SOCIALES = ["Avalian", "Federada", "Sancor", "Prevención", "Jerárquicos", "Swiss Medical", "Ciencias Económicas", "Caja Forense", "Otra"];
 
@@ -504,9 +540,9 @@ export default function KSCStudioApp() {
 
       <main className="content">
         {viewPermitida === "agenda" && <AgendaView turnos={turnos} setTurnos={setTurnos} pacientes={pacientes} setPacientes={setPacientes} pacienteById={pacienteById} />}
-        {viewPermitida === "registro" && <RegistroDiarioView registros={registros} setRegistros={setRegistros} pacientes={pacientes} setPacientes={setPacientes} />}
+        {viewPermitida === "registro" && <RegistroDiarioView registros={registros} setRegistros={setRegistros} pacientes={pacientes} setPacientes={setPacientes} cobros={cobros} />}
         {viewPermitida === "pacientes" && <PacientesView pacientes={pacientes} setPacientes={setPacientes} turnos={turnos} registros={registros} />}
-        {viewPermitida === "cobros" && <CobrosView cobros={cobros} setCobros={setCobros} pacientes={pacientes} setPacientes={setPacientes} turnos={turnos} />}
+        {viewPermitida === "cobros" && <CobrosView cobros={cobros} setCobros={setCobros} pacientes={pacientes} setPacientes={setPacientes} turnos={turnos} registros={registros} />}
         {viewPermitida === "seguimiento" && <SeguimientoView pacientes={pacientes} turnos={turnos} contactos={contactos} setContactos={setContactos} />}
         {viewPermitida === "reportes" && <ReportesView turnos={turnos} cobros={cobros} pacientes={pacientes} />}
         {viewPermitida === "usuarios" && <UsuariosView usuarios={perfiles} setUsuarios={setPerfiles} currentUser={currentUser} pacientes={pacientes} turnos={turnos} cobros={cobros} registros={registros} contactos={contactos} />}
@@ -1055,10 +1091,11 @@ function ConfirmModal({ title, message, confirmLabel = "Eliminar", onConfirm, on
 }
 
 // ================= REGISTRO DIARIO =================
-function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }) {
+function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes, cobros = [] }) {
   const [tab, setTab] = useState("semana");
   const [showNew, setShowNew] = useState(false);
   const [editando, setEditando] = useState(null);
+  const [aviso, setAviso] = useState(null);
 
   const pacienteById = (id) => pacientes.find((p) => p.id === id);
 
@@ -1069,7 +1106,16 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
   };
 
   const addRegistro = (r) => {
-    setRegistros([...registros, { id: uid(), ...r }]);
+    const nuevo = { id: uid(), ...r };
+    setRegistros([...registros, nuevo]);
+    // Aviso cuando este ingreso descuenta la última sesión paga (o ya no quedaban).
+    if (r.tipo === TIPO_SESIONES) {
+      const s = estadoSesiones(r.pacienteId, cobros, [...registros, nuevo]);
+      const nombre = pacientes.find((p) => p.id === r.pacienteId)?.nombre || "El paciente";
+      if (s && s.restantes <= 0) setAviso({ tono: "coral", texto: `${nombre} se quedó sin sesiones pagas. Ya aparece en Cobros → Vencimientos para avisarle y renovar.` });
+      else if (s && s.restantes === 1) setAviso({ tono: "clay", texto: `A ${nombre} le queda 1 sesión paga.` });
+      else setAviso(null);
+    } else setAviso(null);
     // Si el paciente había dejado de asistir y tenía el aviso de mensualidad
     // pausado, al volver a aparecer en el registro se reactiva solo.
     const paciente = pacientes.find((p) => p.id === r.pacienteId);
@@ -1090,6 +1136,17 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
         <Btn variant="clay" onClick={() => setShowNew(true)}><Plus size={16} /> Nuevo registro</Btn>
       </div>
 
+      {aviso && (
+        <div style={{
+          background: aviso.tono === "coral" ? "#F3D9D6" : "#F1DDC9", color: aviso.tono === "coral" ? "#8C2F32" : "#8A4E1F",
+          padding: "10px 14px", fontSize: 13.5, marginBottom: 16, borderRadius: 3, display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>{aviso.texto}</span>
+          <button className="icon-btn" onClick={() => setAviso(null)} title="Cerrar"><X size={15} /></button>
+        </div>
+      )}
+
       <div className="tab-switch">
         <button className={"tab-btn" + (tab === "semana" ? " active" : "")} onClick={() => setTab("semana")}>Semana</button>
         <button className={"tab-btn" + (tab === "mes" ? " active" : "")} onClick={() => setTab("mes")}>Mes</button>
@@ -1104,6 +1161,8 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
       {showNew && (
         <NuevoRegistroModal
           pacientes={pacientes}
+          cobros={cobros}
+          registros={registros}
           onCreatePacienteCompleto={crearPacienteCompleto}
           onClose={() => setShowNew(false)}
           onSave={(r) => { addRegistro(r); setShowNew(false); }}
@@ -1112,6 +1171,8 @@ function RegistroDiarioView({ registros, setRegistros, pacientes, setPacientes }
       {editando && (
         <NuevoRegistroModal
           pacientes={pacientes}
+          cobros={cobros}
+          registros={registros}
           onCreatePacienteCompleto={crearPacienteCompleto}
           initial={editando}
           onClose={() => setEditando(null)}
@@ -1143,7 +1204,7 @@ function RegistroTabla({ filas, pacienteById, onEditar, onEliminar, vacioTexto }
                   <td>{r.hora || "—"}</td>
                   <td style={{ fontWeight: 600 }}>{pacienteById(r.pacienteId)?.nombre || "Paciente eliminado"}</td>
                   <td>{r.profesional}</td>
-                  <td><Badge tone={r.tipo === "Mensual" ? "clay" : "sage"}>{r.tipo}</Badge></td>
+                  <td><Badge tone={r.tipo === "Mensual" ? "clay" : r.tipo === TIPO_SESIONES ? "pine" : "sage"}>{r.tipo}</Badge></td>
                   <td>{r.notas || "—"}</td>
                   <td>
                     <div style={{ display: "flex", gap: 6 }}>
@@ -1207,30 +1268,182 @@ function RegistroResumenPorPaciente({ filas, pacienteById, titulo }) {
   );
 }
 
-function descargarExcelRegistros(filas, pacienteById, nombreArchivo) {
-  const filasExcel = filas.map((r) => ({
-    Fecha: fmtDate(r.fecha),
-    Hora: r.hora || "",
-    Paciente: pacienteById(r.pacienteId)?.nombre || "Paciente eliminado",
-    Profesional: r.profesional,
-    "Individual o mensualidad": r.tipo,
-    Notas: r.notas || "",
-  }));
-  const hoja = XLSX.utils.json_to_sheet(filasExcel);
-  hoja["!cols"] = [{ wch: 14 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 20 }, { wch: 30 }];
+const filaRegistroExcel = (r, pacienteById) => ({
+  Fecha: fmtDate(r.fecha),
+  Hora: r.hora || "",
+  Paciente: pacienteById(r.pacienteId)?.nombre || "Paciente eliminado",
+  Profesional: r.profesional,
+  "Individual, mensualidad o por sesiones": r.tipo,
+  Notas: r.notas || "",
+});
+const ANCHOS_REGISTRO = [{ wch: 14 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 22 }, { wch: 30 }];
+
+// Si porProfesional es true, el libro trae una hoja "Todos" y una hoja por cada profesional.
+function descargarExcelRegistros(filas, pacienteById, nombreArchivo, { porProfesional = false } = {}) {
   const libro = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(libro, hoja, "Registro diario");
+  const agregarHoja = (nombre, registros) => {
+    const hoja = XLSX.utils.json_to_sheet(registros.map((r) => filaRegistroExcel(r, pacienteById)));
+    hoja["!cols"] = ANCHOS_REGISTRO;
+    XLSX.utils.book_append_sheet(libro, hoja, nombre.replace(/[\\/?*[\]:]/g, " ").slice(0, 31) || "Hoja");
+  };
+  agregarHoja(porProfesional ? "Todos" : "Registro diario", filas);
+  if (porProfesional) {
+    const nombres = [...new Set(filas.map((r) => r.profesional || SIN_PROFESIONAL))].sort();
+    nombres.forEach((n) => agregarHoja(n, filas.filter((r) => (r.profesional || SIN_PROFESIONAL) === n)));
+  }
   XLSX.writeFile(libro, nombreArchivo);
+}
+
+// Texto seguro para las fuentes estándar de PDF (Latin-1).
+const pdfTxt = (t) =>
+  String(t ?? "")
+    .replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[^\x20-\x7E¡-ÿ]/g, "?");
+
+// PDF simple con encabezado de KSC Studio, resumen opcional por profesional y tabla de ingresos.
+async function descargarPdfRegistros(filas, pacienteById, { titulo, periodo, profesional, nombreArchivo }) {
+  const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
+  const pdf = await PDFDocument.create();
+  const fuente = await pdf.embedFont(StandardFonts.Helvetica);
+  const negrita = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const W = 595.28, H = 841.89, M = 40;
+  const clay = rgb(0.737, 0.498, 0.333), tinta = rgb(0.08, 0.06, 0.05), gris = rgb(0.49, 0.45, 0.39), banda = rgb(0.93, 0.9, 0.85);
+  const columnas = [
+    { t: "Fecha", w: 58 }, { t: "Hora", w: 36 }, { t: "Paciente", w: 128 },
+    { t: "Profesional", w: 100 }, { t: "Tipo", w: 70 }, { t: "Notas", w: W - 2 * M - 392 },
+  ];
+  const TAM = 8.5, INTERLINEA = 11, PAD = 4;
+
+  const partir = (texto, ancho, f) => {
+    const limpio = pdfTxt(texto);
+    if (!limpio) return [""];
+    const lineas = [];
+    let actual = "";
+    limpio.split(" ").forEach((palabra) => {
+      let w = palabra;
+      while (f.widthOfTextAtSize(w, TAM) > ancho) { // palabra más larga que la columna
+        let corte = w.length - 1;
+        while (corte > 1 && f.widthOfTextAtSize(w.slice(0, corte), TAM) > ancho) corte--;
+        if (actual) { lineas.push(actual); actual = ""; }
+        lineas.push(w.slice(0, corte));
+        w = w.slice(corte);
+      }
+      const prueba = actual ? actual + " " + w : w;
+      if (f.widthOfTextAtSize(prueba, TAM) <= ancho) actual = prueba;
+      else { lineas.push(actual); actual = w; }
+    });
+    if (actual) lineas.push(actual);
+    return lineas;
+  };
+
+  let pagina, y;
+  const nuevaPagina = (conTitulo) => {
+    pagina = pdf.addPage([W, H]);
+    y = H - M;
+    if (conTitulo) {
+      pagina.drawRectangle({ x: 0, y: H - 70, width: W, height: 70, color: rgb(0.04, 0.04, 0.04) });
+      pagina.drawText("KSC", { x: M, y: H - 38, size: 20, font: negrita, color: clay });
+      pagina.drawText("STUDIO", { x: M + 52, y: H - 38, size: 9, font: fuente, color: clay });
+      pagina.drawText(pdfTxt(titulo), { x: M, y: H - 58, size: 11, font: fuente, color: rgb(0.95, 0.92, 0.87) });
+      y = H - 70 - 24;
+      pagina.drawText(pdfTxt(periodo), { x: M, y, size: 11, font: negrita, color: tinta });
+      y -= 15;
+      pagina.drawText(pdfTxt(`Profesional: ${profesional} · Generado el ${fmtDate(todayISO())}`), { x: M, y, size: 9, font: fuente, color: gris });
+      y -= 22;
+    }
+  };
+  const encabezadoTabla = (cols) => {
+    pagina.drawRectangle({ x: M, y: y - 16, width: W - 2 * M, height: 18, color: banda });
+    let x = M;
+    cols.forEach((c) => { pagina.drawText(pdfTxt(c.t), { x: x + PAD, y: y - 11, size: 8.5, font: negrita, color: tinta }); x += c.w; });
+    y -= 20;
+  };
+  const fila = (cols, celdas) => {
+    const lineas = celdas.map((c, i) => partir(c, cols[i].w - 2 * PAD, fuente));
+    const alto = Math.max(...lineas.map((l) => l.length)) * INTERLINEA + 6;
+    if (y - alto < M + 24) { nuevaPagina(false); encabezadoTabla(cols); }
+    let x = M;
+    lineas.forEach((ls, i) => {
+      ls.forEach((l, j) => pagina.drawText(l, { x: x + PAD, y: y - 10 - j * INTERLINEA, size: TAM, font: fuente, color: tinta }));
+      x += cols[i].w;
+    });
+    y -= alto;
+    pagina.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.4, color: rgb(0.9, 0.87, 0.81) });
+  };
+
+  nuevaPagina(true);
+
+  if (profesional === "Todos los profesionales" && filas.length) {
+    const conteo = {};
+    filas.forEach((r) => { const k = r.profesional || SIN_PROFESIONAL; conteo[k] = (conteo[k] || 0) + 1; });
+    const colsRes = [{ t: "Ingresos por profesional", w: 260 }, { t: "Cantidad", w: 80 }];
+    encabezadoTabla(colsRes);
+    Object.entries(conteo).sort((a, b) => b[1] - a[1]).forEach(([n, c]) => fila(colsRes, [n, String(c)]));
+    y -= 16;
+  }
+
+  if (!filas.length) {
+    pagina.drawText("No hay ingresos registrados para este período.", { x: M, y, size: 10, font: fuente, color: gris });
+  } else {
+    encabezadoTabla(columnas);
+    filas.forEach((r) => fila(columnas, [
+      fmtDate(r.fecha), r.hora || "-", pacienteById(r.pacienteId)?.nombre || "Paciente eliminado", r.profesional || SIN_PROFESIONAL, r.tipo, r.notas || "",
+    ]));
+    y -= 10;
+    if (y < M + 24) nuevaPagina(false);
+    pagina.drawText(`Total de ingresos: ${filas.length}`, { x: M, y: y - 8, size: 9.5, font: negrita, color: tinta });
+  }
+
+  const paginas = pdf.getPages();
+  paginas.forEach((pg, i) => pg.drawText(`Página ${i + 1} de ${paginas.length}`, { x: W - M - 70, y: 22, size: 8, font: fuente, color: gris }));
+  const bytes = await pdf.save();
+  descargarArchivo(nombreArchivo, bytes, "application/pdf");
+}
+
+// Barra con el filtro por profesional y los botones de descarga (Excel y PDF).
+function RegistroDescargas({ prof, setProf, filas, pacienteById, periodo, titulo, archivoBase, profesionales }) {
+  const [generando, setGenerando] = useState(false);
+  const etiqueta = prof === "todos" ? "Todos los profesionales" : prof;
+  const sufijo = prof === "todos" ? "" : "-" + prof.toLowerCase().replace(/\s+/g, "-");
+  const bajarPdf = async () => {
+    setGenerando(true);
+    try {
+      await descargarPdfRegistros(filas, pacienteById, { titulo, periodo, profesional: etiqueta, nombreArchivo: `${archivoBase}${sufijo}.pdf` });
+    } catch (e) {
+      console.error("Error generando PDF:", e);
+      alert("No se pudo generar el PDF. Probá de nuevo o descargá el Excel.");
+    }
+    setGenerando(false);
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginLeft: "auto" }}>
+      <Field label="Profesional">
+        <select value={prof} onChange={(e) => setProf(e.target.value)}>
+          <option value="todos">Todos los profesionales</option>
+          {profesionales.map((pr) => <option key={pr} value={pr}>{pr}</option>)}
+          <option value={SIN_PROFESIONAL}>{SIN_PROFESIONAL}</option>
+        </select>
+      </Field>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <Btn variant="ghost" small onClick={() => descargarExcelRegistros(filas, pacienteById, `${archivoBase}${sufijo}.xlsx`, { porProfesional: prof === "todos" })}><FileDown size={13} /> Excel</Btn>
+        <Btn variant="ghost" small onClick={bajarPdf}><FileDown size={13} /> {generando ? "Generando…" : "PDF"}</Btn>
+      </div>
+    </div>
+  );
 }
 
 function RegistroSemanaView({ registros, pacientes, pacienteById, onEditar, onEliminar }) {
   const [semanaInicio, setSemanaInicio] = useState(mondayOf(todayISO()));
   const [q, setQ] = useState("");
+  const [prof, setProf] = useState("todos");
   const semanaFin = addDays(semanaInicio, 6);
 
   const deLaSemana = useMemo(
-    () => registros.filter((r) => r.fecha >= semanaInicio && r.fecha <= semanaFin).sort((a, b) => b.fecha.localeCompare(a.fecha)),
-    [registros, semanaInicio, semanaFin]
+    () => registros
+      .filter((r) => r.fecha >= semanaInicio && r.fecha <= semanaFin && coincideProfesional(r, prof))
+      .sort((a, b) => b.fecha.localeCompare(a.fecha)),
+    [registros, semanaInicio, semanaFin, prof]
   );
 
   const filtrados = useMemo(
@@ -1248,9 +1461,11 @@ function RegistroSemanaView({ registros, pacientes, pacienteById, onEditar, onEl
         <button className="icon-btn" onClick={() => cambiarSemana(1)}><ChevronRight size={20} /></button>
         <span style={{ fontFamily: "'Fraunces',serif", fontSize: 16 }}>Semana del {fmtDate(semanaInicio)} al {fmtDate(semanaFin)}</span>
         <button onClick={() => setSemanaInicio(mondayOf(todayISO()))} style={{ background: "none", border: "none", color: "#8C5A34", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>Esta semana</button>
-        <div style={{ marginLeft: "auto" }}>
-          <Btn variant="ghost" small onClick={() => descargarExcelRegistros(filtrados, pacienteById, `registro-diario-semana-KSC-${semanaInicio}.xlsx`)}><FileDown size={13} /> Descargar Excel</Btn>
-        </div>
+        <RegistroDescargas
+          prof={prof} setProf={setProf} filas={filtrados} pacienteById={pacienteById}
+          periodo={`Semana del ${fmtDate(semanaInicio)} al ${fmtDate(semanaFin)}`} titulo="Registro diario de ingresos"
+          archivoBase={`registro-diario-semana-KSC-${semanaInicio}`} profesionales={listaProfesionales(registros)}
+        />
       </div>
 
       <div className="panel" style={{ padding: "10px 16px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10 }}>
@@ -1267,10 +1482,13 @@ function RegistroSemanaView({ registros, pacientes, pacienteById, onEditar, onEl
 function RegistroMesView({ registros, pacientes, pacienteById, onEditar, onEliminar }) {
   const [mes, setMes] = useState(todayISO().slice(0, 7));
   const [q, setQ] = useState("");
+  const [prof, setProf] = useState("todos");
 
   const delMes = useMemo(
-    () => registros.filter((r) => r.fecha.slice(0, 7) === mes).sort((a, b) => b.fecha.localeCompare(a.fecha)),
-    [registros, mes]
+    () => registros
+      .filter((r) => r.fecha.slice(0, 7) === mes && coincideProfesional(r, prof))
+      .sort((a, b) => b.fecha.localeCompare(a.fecha)),
+    [registros, mes, prof]
   );
 
   const filtrados = useMemo(
@@ -1282,9 +1500,11 @@ function RegistroMesView({ registros, pacientes, pacienteById, onEditar, onElimi
     <div>
       <div className="panel" style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
         <Field label="Mes"><input type="month" value={mes} onChange={(e) => setMes(e.target.value)} /></Field>
-        <div style={{ marginLeft: "auto" }}>
-          <Btn variant="ghost" small onClick={() => descargarExcelRegistros(filtrados, pacienteById, `registro-diario-mes-KSC-${mes}.xlsx`)}><FileDown size={13} /> Descargar Excel</Btn>
-        </div>
+        <RegistroDescargas
+          prof={prof} setProf={setProf} filas={filtrados} pacienteById={pacienteById}
+          periodo={`Mes de ${["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"][Number(mes.slice(5, 7)) - 1]} de ${mes.slice(0, 4)}`} titulo="Registro diario de ingresos"
+          archivoBase={`registro-diario-mes-KSC-${mes}`} profesionales={listaProfesionales(registros)}
+        />
       </div>
 
       <div className="panel" style={{ padding: "10px 16px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10 }}>
@@ -1299,7 +1519,7 @@ function RegistroMesView({ registros, pacientes, pacienteById, onEditar, onElimi
 }
 
 
-function NuevoRegistroModal({ pacientes, onCreatePacienteCompleto, onClose, onSave, initial = null }) {
+function NuevoRegistroModal({ pacientes, cobros = [], registros = [], onCreatePacienteCompleto, onClose, onSave, initial = null }) {
   const [pacienteId, setPacienteId] = useState(initial?.pacienteId || "");
   const [fecha, setFecha] = useState(initial?.fecha || todayISO());
   const [hora, setHora] = useState(initial?.hora || (() => new Date().toTimeString().slice(0, 5))());
@@ -1310,12 +1530,23 @@ function NuevoRegistroModal({ pacientes, onCreatePacienteCompleto, onClose, onSa
 
   const pacienteSeleccionado = pacientes.find((p) => p.id === pacienteId);
   const mensualidad = estadoMensualidad(pacienteSeleccionado);
+  const sesiones = pacienteSeleccionado ? estadoSesiones(pacienteSeleccionado.id, cobros, registros, initial?.id || null) : null;
+  const sesionesVisibles = sesiones && sesiones.vigente;
+
+  // Al elegir un paciente con sesiones pagas disponibles, el ingreso se propone como "Por sesiones".
+  const elegirPaciente = (id) => {
+    setPacienteId(id);
+    if (initial) return;
+    const s = estadoSesiones(id, cobros, registros);
+    if (s && s.restantes > 0) setTipo(TIPO_SESIONES);
+    else if (tipo === TIPO_SESIONES) setTipo(TIPOS_PAGO[0]);
+  };
 
   return (
     <>
     <Modal title={initial ? "Editar registro" : "Nuevo registro de ingreso"} onClose={onClose}>
       <Field label="Paciente">
-        <PatientPicker pacientes={pacientes} value={pacienteId} onChange={setPacienteId} onCreateNew={(nombre) => { setCreandoNombre(nombre); return null; }} />
+        <PatientPicker pacientes={pacientes} value={pacienteId} onChange={elegirPaciente} onCreateNew={(nombre) => { setCreandoNombre(nombre); return null; }} />
       </Field>
 
       {mensualidad && (
@@ -1337,7 +1568,29 @@ function NuevoRegistroModal({ pacientes, onCreatePacienteCompleto, onClose, onSa
           </span>
         </div>
       )}
-      {pacienteSeleccionado && !mensualidad && (
+      {sesionesVisibles && (
+        <div style={{
+          background: sesiones.restantes <= 0 ? "#F3D9D6" : sesiones.restantes === 1 ? "#F1DDC9" : "#EDE6D8",
+          color: sesiones.restantes <= 0 ? "#8C2F32" : "#5C5245",
+          padding: "10px 12px", fontSize: 13, marginBottom: 14, borderRadius: 3, display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+          <span style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <Badge tone={sesiones.tone}>{sesiones.restantes <= 0 ? "Sin sesiones" : `Sesiones: quedan ${sesiones.restantes}`}</Badge>
+            <span>
+              {sesiones.restantes <= 0
+                ? `${pacienteSeleccionado.nombre} usó todas las sesiones que tenía pagas (${sesiones.usadas} de ${sesiones.compradas}). Si abona otras, registrá un cobro "Por sesiones".`
+                : tipo === TIPO_SESIONES
+                ? (sesiones.restantes === 1
+                  ? `Es su última sesión paga: al guardar este ingreso va a aparecer como "Sin sesiones" en Vencimientos.`
+                  : `Le quedan ${sesiones.restantes} sesiones pagas. Al guardar este ingreso le van a quedar ${sesiones.restantes - 1}.`)
+                : `Tiene ${sesiones.restantes} sesión(es) paga(s) disponible(s). Si este ingreso es una de esas sesiones, elegí "Por sesiones" para descontarla.`}
+              {tipo === TIPO_SESIONES && sesiones.restantes <= 0 && " Si lo guardás como \"Por sesiones\" va a quedar en negativo."}
+            </span>
+          </span>
+        </div>
+      )}
+      {pacienteSeleccionado && !mensualidad && !sesionesVisibles && (
         <div style={{
           background: "#EFEAE0", color: "#7C7264",
           padding: "10px 12px", fontSize: 13, marginBottom: 14, borderRadius: 3, display: "flex", alignItems: "center", gap: 8,
@@ -1784,14 +2037,19 @@ function InfoLine({ icon, text }) {
 }
 
 // ================= COBROS =================
-function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
+function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos, registros = [] }) {
   const [showNew, setShowNew] = useState(false);
   const [mesFiltro, setMesFiltro] = useState(todayISO().slice(0, 7));
   const [tab, setTab] = useState("mes");
   const [notaCobro, setNotaCobro] = useState(null);
   const [editCobro, setEditCobro] = useState(null);
+  const [filtroProf, setFiltroProf] = useState("todos");
 
-  const delMes = cobros.filter((c) => c.fecha.slice(0, 7) === mesFiltro).sort((a, b) => b.fecha.localeCompare(a.fecha));
+  const profesionalesCobros = listaProfesionales(cobros);
+  const delMes = cobros
+    .filter((c) => c.fecha.slice(0, 7) === mesFiltro)
+    .filter((c) => coincideProfesional(c, filtroProf))
+    .sort((a, b) => b.fecha.localeCompare(a.fecha));
   const totalMes = delMes.reduce((acc, c) => acc + Number(c.monto || 0), 0);
   const guardarObservaciones = (id, texto) => {
     setCobros(cobros.map((c) => (c.id === id ? { ...c, observaciones: texto } : c)));
@@ -1802,6 +2060,9 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
     if (c.tipoPago === "Mensual") {
       const vencimiento = addMonths(c.fecha, 1);
       setPacientes(pacientes.map((p) => (p.id === c.pacienteId ? { ...p, planPago: "Mensual", vencimientoMensualidad: vencimiento } : p)));
+    } else if (c.tipoPago === TIPO_SESIONES) {
+      // Si había dejado de asistir y vuelve a pagar sesiones, se reactiva el aviso.
+      setPacientes(pacientes.map((p) => (p.id === c.pacienteId && p.pausadoVencimiento ? { ...p, pausadoVencimiento: false } : p)));
     } else if (c.tipoPago === "Individual") {
       setPacientes(pacientes.map((p) => (p.id === c.pacienteId ? { ...p, planPago: "Individual" } : p)));
     }
@@ -1846,18 +2107,25 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
         <>
           <div className="panel" style={{ padding: "16px 20px", marginBottom: 18, display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
             <Field label="Mes"><input type="month" value={mesFiltro} onChange={(e) => setMesFiltro(e.target.value)} /></Field>
+            <Field label="Profesional">
+              <select value={filtroProf} onChange={(e) => setFiltroProf(e.target.value)}>
+                <option value="todos">Todos los profesionales</option>
+                {profesionalesCobros.map((pr) => <option key={pr} value={pr}>{pr}</option>)}
+                <option value={SIN_PROFESIONAL}>{SIN_PROFESIONAL}</option>
+              </select>
+            </Field>
             <div style={{ marginLeft: "auto", textAlign: "right" }}>
-              <div style={{ fontSize: 12, color: "#7C7264" }}>Total cobrado en el mes</div>
+              <div style={{ fontSize: 12, color: "#7C7264" }}>{filtroProf === "todos" ? "Total cobrado en el mes" : `Total cobrado · ${filtroProf}`}</div>
               <div style={{ fontFamily: "'Fraunces',serif", fontSize: 26, color: "#8C5A34", fontWeight: 600 }}>{fmtMoney(totalMes)}</div>
             </div>
           </div>
 
           <div className="panel">
             {delMes.length === 0 ? (
-              <div className="empty-state">No hay cobros registrados en este mes.</div>
+              <div className="empty-state">{filtroProf === "todos" ? "No hay cobros registrados en este mes." : "No hay cobros de este profesional en este mes."}</div>
             ) : (
               <table>
-                <thead><tr><th>Fecha</th><th>Paciente</th><th>Tipo de servicio</th><th>Obra social</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th><th></th><th></th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Paciente</th><th>Profesional</th><th>Tipo de servicio</th><th>Obra social</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th><th></th><th></th></tr></thead>
                 <tbody>
                   {delMes.map((c) => {
                     const pac = pacientes.find((p) => p.id === c.pacienteId);
@@ -1866,7 +2134,8 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
                       <tr key={c.id}>
                         <td>{fmtDate(c.fecha)}</td>
                         <td>{pac ? pac.nombre : "—"}</td>
-                        <td>{c.tipoServicio ? <Badge tone="clay">{c.tipoServicio}</Badge> : "—"}</td>
+                        <td>{c.profesional || <span className="muted-text">—</span>}</td>
+                        <td>{c.tipoServicio ? <Badge tone="clay">{c.tipoServicio}</Badge> : "—"}{c.tipoPago === TIPO_SESIONES && <> <Badge tone="sage">{c.cantidadSesiones || 0} ses.</Badge></>}</td>
                         <td>{c.obraSocial ? <Badge tone="sage">{c.obraSocial}</Badge> : "Particular"}</td>
                         <td>{c.concepto}</td>
                         <td><Badge tone="sage">{c.metodo}</Badge></td>
@@ -1896,7 +2165,7 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos }) {
       ) : tab === "reportemensual" ? (
         <ReporteMensualView cobros={cobros} turnos={turnos} pacientes={pacientes} />
       ) : (
-        <VencimientosView pacientes={pacientes} setPacientes={setPacientes} />
+        <VencimientosView pacientes={pacientes} setPacientes={setPacientes} cobros={cobros} registros={registros} />
       )}
 
       {showNew && (
@@ -1941,28 +2210,41 @@ function ObservacionesCobroModal({ cobro, pacientes, onSave, onClose }) {
   );
 }
 
-function VencimientosView({ pacientes, setPacientes }) {
-  const [waPaciente, setWaPaciente] = useState(null);
+function VencimientosView({ pacientes, setPacientes, cobros = [], registros = [] }) {
+  const [waFila, setWaFila] = useState(null);
   const [q, setQ] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("todos");
+  const [filtroTipo, setFiltroTipo] = useState("todos");
   const [verPausados, setVerPausados] = useState(false);
 
   const estadoDe = (dias) => (dias < 0 ? "vencido" : dias <= UMBRAL_PROXIMO_A_VENCER ? "proximo" : "al_dia");
 
-  const conMensualidad = pacientes
-    .filter((p) => p.planPago === "Mensual" && p.vencimientoMensualidad)
-    .map((p) => ({ ...p, dias: diasEntre(todayISO(), p.vencimientoMensualidad) }))
-    .sort((a, b) => a.dias - b.dias);
+  // Una fila por cada mensualidad y una por cada paciente con sesiones pagas en seguimiento.
+  const filas = [
+    ...pacientes
+      .filter((p) => p.planPago === "Mensual" && p.vencimientoMensualidad)
+      .map((p) => {
+        const dias = diasEntre(todayISO(), p.vencimientoMensualidad);
+        return { key: p.id + "-m", tipo: "mensual", p, dias, estado: estadoDe(dias), orden: dias };
+      }),
+    ...pacientes
+      .map((p) => ({ p, s: estadoSesiones(p.id, cobros, registros) }))
+      .filter((x) => x.s && x.s.vigente)
+      .map(({ p, s }) => ({ key: p.id + "-s", tipo: "sesiones", p, s, estado: s.estado, orden: s.restantes <= 0 ? -1 : s.restantes === 1 ? 1 : 100 + s.restantes })),
+  ].sort((a, b) => a.orden - b.orden);
 
-  const activos = conMensualidad.filter((p) => !p.pausadoVencimiento);
-  const pausados = conMensualidad.filter((p) => p.pausadoVencimiento);
+  const activos = filas.filter((f) => !f.p.pausadoVencimiento);
+  const pausados = filas.filter((f) => f.p.pausadoVencimiento);
 
   const filtrados = activos
-    .filter((p) => p.nombre.toLowerCase().includes(q.toLowerCase()))
-    .filter((p) => filtroEstado === "todos" || estadoDe(p.dias) === filtroEstado);
+    .filter((f) => f.p.nombre.toLowerCase().includes(q.toLowerCase()))
+    .filter((f) => filtroEstado === "todos" || f.estado === filtroEstado)
+    .filter((f) => filtroTipo === "todos" || f.tipo === filtroTipo);
 
   const pausar = (id) => setPacientes(pacientes.map((p) => (p.id === id ? { ...p, pausadoVencimiento: true } : p)));
   const reactivar = (id) => setPacientes(pacientes.map((p) => (p.id === id ? { ...p, pausadoVencimiento: false } : p)));
+
+  const selStyle = { border: "1px solid #D6CBB8", borderRadius: 3, padding: "8px 10px", fontSize: 13, fontFamily: "'IBM Plex Sans',sans-serif" };
 
   return (
     <div>
@@ -1971,40 +2253,52 @@ function VencimientosView({ pacientes, setPacientes }) {
           <Search size={16} color="#A89D8C" />
           <input type="text" placeholder="Buscar paciente por nombre…" value={q} onChange={(e) => setQ(e.target.value)} style={{ border: "none", fontSize: 14, fontFamily: "'IBM Plex Sans',sans-serif" }} />
         </div>
-        <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} style={{ border: "1px solid #D6CBB8", borderRadius: 3, padding: "8px 10px", fontSize: 13, fontFamily: "'IBM Plex Sans',sans-serif" }}>
+        <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)} style={selStyle}>
+          <option value="todos">Mensualidades y sesiones</option>
+          <option value="mensual">Solo mensualidades</option>
+          <option value="sesiones">Solo por sesiones</option>
+        </select>
+        <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} style={selStyle}>
           <option value="todos">Todos los estados</option>
-          <option value="vencido">Vencidos</option>
+          <option value="vencido">Vencidos / sin sesiones</option>
           <option value="proximo">Próximos a vencer</option>
           <option value="al_dia">Al día</option>
         </select>
       </div>
 
       <div className="panel">
-        {conMensualidad.length === 0 ? (
-          <div className="empty-state">Ningún paciente con mensualidad cargada todavía. Se completa solo cuando registrás un cobro tipo "Mensual".</div>
+        {filas.length === 0 ? (
+          <div className="empty-state">Ningún paciente con mensualidad o sesiones cargadas todavía. Se completa solo cuando registrás un cobro tipo "Mensual" o "Por sesiones".</div>
         ) : filtrados.length === 0 ? (
           <div className="empty-state">No hay pacientes que coincidan con la búsqueda o el filtro elegido.</div>
         ) : (
           <table>
-            <thead><tr><th>Paciente</th><th>Vencimiento</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th>Paciente</th><th>Tipo</th><th>Vencimiento / Sesiones</th><th>Estado</th><th></th></tr></thead>
             <tbody>
-              {filtrados.map((p) => (
-                <tr key={p.id}>
-                  <td style={{ fontWeight: 600 }}>{p.nombre}</td>
-                  <td>{fmtDate(p.vencimientoMensualidad)}</td>
+              {filtrados.map((f) => (
+                <tr key={f.key}>
+                  <td style={{ fontWeight: 600 }}>{f.p.nombre}</td>
+                  <td><Badge tone={f.tipo === "mensual" ? "clay" : "sage"}>{f.tipo === "mensual" ? "Mensualidad" : "Por sesiones"}</Badge></td>
                   <td>
-                    {p.dias < 0
-                      ? <Badge tone="coral">Vencido hace {Math.abs(p.dias)} día(s)</Badge>
-                      : p.dias <= UMBRAL_PROXIMO_A_VENCER
-                      ? <Badge tone="clay">Próximo a vencer · {p.dias} día(s)</Badge>
-                      : <Badge tone="sage">Al día · {p.dias} día(s)</Badge>}
+                    {f.tipo === "mensual"
+                      ? fmtDate(f.p.vencimientoMensualidad)
+                      : `Usó ${f.s.usadas} de ${f.s.compradas} · ${f.s.restantes > 0 ? `quedan ${f.s.restantes}` : "no le quedan"}`}
+                  </td>
+                  <td>
+                    {f.tipo === "mensual"
+                      ? (f.dias < 0
+                        ? <Badge tone="coral">Vencido hace {Math.abs(f.dias)} día(s)</Badge>
+                        : f.dias <= UMBRAL_PROXIMO_A_VENCER
+                        ? <Badge tone="clay">Próximo a vencer · {f.dias} día(s)</Badge>
+                        : <Badge tone="sage">Al día · {f.dias} día(s)</Badge>)
+                      : <Badge tone={f.s.tone}>{f.s.restantes <= 0 ? "Sin sesiones" : f.s.restantes === 1 ? "Última sesión · queda 1" : `Al día · ${f.s.restantes} sesiones`}</Badge>}
                   </td>
                   <td>
                     <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                      {p.telefono
-                        ? <Btn variant="clay" small onClick={() => setWaPaciente(p)}><MessageCircle size={13} /> WhatsApp</Btn>
+                      {f.p.telefono
+                        ? <Btn variant="clay" small onClick={() => setWaFila(f)}><MessageCircle size={13} /> WhatsApp</Btn>
                         : <span className="muted-text" style={{ fontSize: 12.5 }}>Sin teléfono</span>}
-                      <Btn variant="ghost" small onClick={() => pausar(p.id)}>No asiste más</Btn>
+                      <Btn variant="ghost" small onClick={() => pausar(f.p.id)}>No asiste más</Btn>
                     </div>
                   </td>
                 </tr>
@@ -2021,13 +2315,14 @@ function VencimientosView({ pacientes, setPacientes }) {
           </button>
           {verPausados && (
             <table>
-              <thead><tr><th>Paciente</th><th>Último vencimiento</th><th></th></tr></thead>
+              <thead><tr><th>Paciente</th><th>Tipo</th><th>Último estado</th><th></th></tr></thead>
               <tbody>
-                {pausados.map((p) => (
-                  <tr key={p.id}>
-                    <td style={{ fontWeight: 600 }}>{p.nombre}</td>
-                    <td>{fmtDate(p.vencimientoMensualidad)}</td>
-                    <td><Btn variant="ghost" small onClick={() => reactivar(p.id)}>Reactivar aviso</Btn></td>
+                {pausados.map((f) => (
+                  <tr key={f.key}>
+                    <td style={{ fontWeight: 600 }}>{f.p.nombre}</td>
+                    <td>{f.tipo === "mensual" ? "Mensualidad" : "Por sesiones"}</td>
+                    <td>{f.tipo === "mensual" ? fmtDate(f.p.vencimientoMensualidad) : `Usó ${f.s.usadas} de ${f.s.compradas}`}</td>
+                    <td><Btn variant="ghost" small onClick={() => reactivar(f.p.id)}>Reactivar aviso</Btn></td>
                   </tr>
                 ))}
               </tbody>
@@ -2038,18 +2333,25 @@ function VencimientosView({ pacientes, setPacientes }) {
 
       <p className="muted-text" style={{ fontSize: 12, marginTop: 14 }}>
         "No asiste más" saca al paciente de esta lista para que no aparezca como vencido. Si vuelve a aparecer en Registro diario, se reactiva solo.
+        Las sesiones se descuentan cuando cargás el ingreso en Registro diario con tipo "Por sesiones".
       </p>
 
-      {waPaciente && (
+      {waFila && (
         <WhatsAppModal
-          nombre={waPaciente.nombre}
-          telefono={waPaciente.telefono}
-          mensaje={waVencimiento(waPaciente.nombre, waPaciente.vencimientoMensualidad, waPaciente.dias)}
-          onClose={() => setWaPaciente(null)}
+          nombre={waFila.p.nombre}
+          telefono={waFila.p.telefono}
+          mensaje={waFila.tipo === "mensual" ? waVencimiento(waFila.p.nombre, waFila.p.vencimientoMensualidad, waFila.dias) : waSesiones(waFila.p.nombre, waFila.s.restantes)}
+          onClose={() => setWaFila(null)}
         />
       )}
     </div>
   );
+}
+
+function waSesiones(nombre, restantes) {
+  const primerNombre = nombre.split(" ")[0];
+  if (restantes <= 0) return `Hola ${primerNombre}! Te escribimos de KSC Studio: ya usaste todas las sesiones que tenías pagas. ¿Coordinamos para renovarlas?`;
+  return `Hola ${primerNombre}! Te recordamos desde KSC Studio que te queda ${restantes === 1 ? "1 sesión" : restantes + " sesiones"} de las que tenías pagas. ¡Avisanos cuando quieras renovar!`;
 }
 
 function waVencimiento(nombre, vencimiento, dias) {
@@ -2058,7 +2360,25 @@ function waVencimiento(nombre, vencimiento, dias) {
   return `Hola ${primerNombre}! Te recordamos desde KSC Studio que tu mensualidad vence el ${fmtDate(vencimiento)}. ¡Te esperamos para renovarla!`;
 }
 
-function ReportePeriodoView({ turnosPeriodo, cobrosPeriodo, pacientes, tituloInforme, subtituloPeriodo, nombreArchivoBase, navegador }) {
+function ReportePeriodoView({ turnosPeriodo: turnosTodos, cobrosPeriodo: cobrosTodos, pacientes, tituloInforme, subtituloPeriodo: subtituloBase, nombreArchivoBase: nombreBase, navegador }) {
+  const [filtroProf, setFiltroProf] = useState("todos");
+  const profesionalesRep = listaProfesionales([...cobrosTodos, ...turnosTodos]);
+  const cobrosPeriodo = useMemo(() => cobrosTodos.filter((c) => coincideProfesional(c, filtroProf)), [cobrosTodos, filtroProf]);
+  const turnosPeriodo = useMemo(() => turnosTodos.filter((t) => coincideProfesional(t, filtroProf)), [turnosTodos, filtroProf]);
+  const subtituloPeriodo = filtroProf === "todos" ? subtituloBase : `${subtituloBase} · Profesional: ${filtroProf}`;
+  const nombreArchivoBase = filtroProf === "todos" ? nombreBase : `${nombreBase}-${filtroProf.toLowerCase().replace(/\s+/g, "-")}`;
+
+  const cobradoPorProfesional = useMemo(() => {
+    const map = {};
+    cobrosTodos.forEach((c) => {
+      const k = c.profesional || SIN_PROFESIONAL;
+      if (!map[k]) map[k] = { profesional: k, cobros: 0, total: 0 };
+      map[k].cobros += 1;
+      map[k].total += Number(c.monto || 0);
+    });
+    return Object.values(map).sort((a, b) => b.total - a.total);
+  }, [cobrosTodos]);
+
   const totalRecaudado = cobrosPeriodo.reduce((a, c) => a + Number(c.monto || 0), 0);
   const ticketPromedio = cobrosPeriodo.length ? totalRecaudado / cobrosPeriodo.length : 0;
 
@@ -2133,6 +2453,10 @@ function ReportePeriodoView({ turnosPeriodo, cobrosPeriodo, pacientes, tituloInf
     <div class="stat"><div class="label">Tasa de cancelación</div><div class="value">${tasaCancelacion}%</div></div>
   </div>
 
+  <h2>Cobrado por profesional</h2>
+  <table><thead><tr><th>Profesional</th><th>Cobros</th><th>Total cobrado</th></tr></thead>
+  <tbody>${cobradoPorProfesional.length ? filas(cobradoPorProfesional, [r => r.profesional, r => r.cobros, r => fmtMoney(r.total)]) : '<tr><td colspan="3">Sin cobros en este período.</td></tr>'}</tbody></table>
+
   <h2>Turnos por profesional</h2>
   <table><thead><tr><th>Profesional</th><th>Turnos totales</th><th>Atendidos</th><th>Cancelados</th></tr></thead>
   <tbody>${porProfesional.length ? filas(porProfesional, [r => r.profesional, r => r.total, r => r.atendidos, r => r.cancelados]) : '<tr><td colspan="4">Sin turnos en este período.</td></tr>'}</tbody></table>
@@ -2159,10 +2483,11 @@ function ReportePeriodoView({ turnosPeriodo, cobrosPeriodo, pacientes, tituloInf
   };
 
   const descargarCSV = () => {
-    const header = ["Fecha", "Paciente", "Concepto", "Metodo", "Monto"];
+    const header = ["Fecha", "Paciente", "Profesional", "Concepto", "Metodo", "Monto"];
     const rows = cobrosPeriodo.map((c) => [
       c.fecha,
       pacientes.find((p) => p.id === c.pacienteId)?.nombre || "Paciente eliminado",
+      c.profesional || SIN_PROFESIONAL,
       c.concepto,
       c.metodo,
       c.monto,
@@ -2175,6 +2500,13 @@ function ReportePeriodoView({ turnosPeriodo, cobrosPeriodo, pacientes, tituloInf
     <div>
       <div className="panel" style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
         {navegador}
+        <Field label="Profesional">
+          <select value={filtroProf} onChange={(e) => setFiltroProf(e.target.value)}>
+            <option value="todos">Todos los profesionales</option>
+            {profesionalesRep.map((pr) => <option key={pr} value={pr}>{pr}</option>)}
+            <option value={SIN_PROFESIONAL}>{SIN_PROFESIONAL}</option>
+          </select>
+        </Field>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <Btn variant="ghost" small onClick={descargarCSV}><Download size={13} /> CSV de cobros</Btn>
           <Btn variant="clay" small onClick={descargarInforme}><FileDown size={13} /> Descargar informe</Btn>
@@ -2187,6 +2519,20 @@ function ReportePeriodoView({ turnosPeriodo, cobrosPeriodo, pacientes, tituloInf
         <StatCard label="Ticket promedio" value={fmtMoney(ticketPromedio)} />
         <StatCard label="Turnos totales" value={turnosPeriodo.length} />
         <StatCard label="Tasa de cancelación" value={`${tasaCancelacion}%`} />
+      </div>
+
+      <div className="panel" style={{ padding: 20, marginBottom: 18 }}>
+        <h4 className="chart-title">Cobrado por profesional {filtroProf !== "todos" && <span className="muted-text" style={{ fontWeight: 400, fontSize: 12.5 }}>(el total de todos, sin filtrar)</span>}</h4>
+        {cobradoPorProfesional.length === 0 ? <p className="muted-text">Sin cobros en este período.</p> : (
+          <table>
+            <thead><tr><th>Profesional</th><th>Cobros</th><th>Total cobrado</th></tr></thead>
+            <tbody>
+              {cobradoPorProfesional.map((r) => (
+                <tr key={r.profesional}><td style={{ fontWeight: 600 }}>{r.profesional}</td><td>{r.cobros}</td><td style={{ fontWeight: 600 }}>{fmtMoney(r.total)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="panel" style={{ padding: 20, marginBottom: 18 }}>
@@ -2319,6 +2665,9 @@ function ReporteMensualView({ cobros, turnos, pacientes }) {
 
 function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial = null }) {
   const editando = !!initial;
+  const [profesional, setProfesional] = useState(initial?.profesional || "");
+  const [cantidadSesiones, setCantidadSesiones] = useState(initial?.cantidadSesiones ? String(initial.cantidadSesiones) : "1");
+  const [intentoGuardar, setIntentoGuardar] = useState(false);
   const osInicial = initial?.obraSocial || "";
   const osEsLista = OBRAS_SOCIALES.includes(osInicial);
   const [pacienteId, setPacienteId] = useState(initial?.pacienteId || "");
@@ -2356,16 +2705,29 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial 
   const modalidades = PRECIOS_SERVICIO[tipoServicio] || [];
   const modalidadActual = modalidades.find((m) => m.modalidad === modalidad) || modalidades[0] || null;
   const tieneObraSocial = obraSocial !== "";
-  const montoSugerido = modalidadActual
+  const montoBase = modalidadActual
     ? (tieneObraSocial && modalidadActual.obraSocial != null ? modalidadActual.obraSocial : modalidadActual.particular)
     : null;
+  // En "Por sesiones", si la modalidad es de una sola sesión, el sugerido se multiplica por la cantidad.
+  const esPrecioUnitario = !esModalidadMensual(modalidad) && !/^\d+ sesiones$/.test(modalidad || "");
+  const cantidadNum = Math.max(1, Number(cantidadSesiones) || 1);
+  const montoSugerido = montoBase != null && tipoPago === TIPO_SESIONES && esPrecioUnitario ? montoBase * cantidadNum : montoBase;
+
+  // Al cambiar la modalidad se propone el tipo de pago más lógico (siempre se puede cambiar a mano).
+  const tipoPagoParaModalidad = (mod, actual) => {
+    if (esModalidadMensual(mod)) return "Mensual";
+    if (/^\d+ sesiones$/.test(mod || "")) return TIPO_SESIONES;
+    return actual === TIPO_SESIONES ? TIPO_SESIONES : "Individual";
+  };
 
   const cambiarTipoServicio = (nuevoTipo) => {
     setTipoServicio(nuevoTipo);
     const nuevasModalidades = PRECIOS_SERVICIO[nuevoTipo] || [];
     const nuevaModalidad = nuevasModalidades[0]?.modalidad || "";
     setModalidad(nuevaModalidad);
-    setTipoPago(esModalidadMensual(nuevaModalidad) ? "Mensual" : "Individual");
+    setTipoPago(tipoPagoParaModalidad(nuevaModalidad, tipoPago));
+    const m = /^(\d+) sesiones$/.exec(nuevaModalidad);
+    if (m) setCantidadSesiones(m[1]);
     setPrecargado(false);
   };
 
@@ -2375,6 +2737,12 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial 
     <>
       <Field label="Paciente">
         <PatientPicker pacientes={pacientes} value={pacienteId} onChange={setPacienteId} onCreateNew={onCreatePaciente} />
+      </Field>
+      <Field label="Profesional que lo atiende">
+        <select value={profesional} onChange={(e) => setProfesional(e.target.value)} style={intentoGuardar && !profesional && !editando ? { borderColor: "#8C2F32" } : undefined}>
+          <option value="">{editando ? "Sin asignar" : "Elegir profesional…"}</option>
+          {PROFESIONALES.map((p) => <option key={p}>{p}</option>)}
+        </select>
       </Field>
       <Field label="Tipo de servicio">
         <select value={tipoServicio} onChange={(e) => cambiarTipoServicio(e.target.value)}>
@@ -2389,7 +2757,13 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial 
 
       {modalidades.length > 0 && (
         <Field label="Modalidad">
-          <select value={modalidad} onChange={(e) => { setModalidad(e.target.value); setTipoPago(esModalidadMensual(e.target.value) ? "Mensual" : "Individual"); setPrecargado(false); }}>
+          <select value={modalidad} onChange={(e) => {
+            setModalidad(e.target.value);
+            setTipoPago(tipoPagoParaModalidad(e.target.value, tipoPago));
+            const m = /^(\d+) sesiones$/.exec(e.target.value);
+            if (m) setCantidadSesiones(m[1]);
+            setPrecargado(false);
+          }}>
             {modalidades.map((m) => <option key={m.modalidad}>{m.modalidad}</option>)}
           </select>
         </Field>
@@ -2443,18 +2817,41 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial 
           </Field>
         </div>
       </div>
+      {tipoPago === TIPO_SESIONES && (
+        <div style={{ background: "#F2ECDE", border: "1px solid #E9E1D3", borderRadius: 3, padding: "12px 14px", marginBottom: 14 }}>
+          <Field label="Cantidad de sesiones que paga">
+            <input type="number" min="1" value={cantidadSesiones} onChange={(e) => setCantidadSesiones(e.target.value)} />
+          </Field>
+          <p style={{ fontSize: 12.5, color: "#7C7264", margin: 0, lineHeight: 1.5 }}>
+            Cada vez que registres su ingreso en Registro diario como "Por sesiones", se descuenta una. Cuando se quede sin sesiones, aparece en Cobros → Vencimientos.
+          </p>
+        </div>
+      )}
       {tipoPago === "Mensual" ? (
         <p style={{ fontSize: 12.5, color: "#7C7264", margin: "-8px 0 14px", lineHeight: 1.5 }}>
           Al guardar, la ficha del paciente va a mostrar que su mensualidad vence el {fmtDate(addMonths(fecha, 1))}, y todo el equipo va a ver ese aviso al registrar su ingreso.
         </p>
-      ) : (
+      ) : tipoPago === TIPO_SESIONES ? null : (
         <p style={{ fontSize: 12.5, color: "#7C7264", margin: "-8px 0 14px", lineHeight: 1.5 }}>
           Con "Individual" este pago no queda en seguimiento de vencimiento mensual. Si en realidad abona por mes, cambiá esta opción a "Mensual".
         </p>
       )}
+      {intentoGuardar && (!monto || !pacienteId || (!profesional && !editando)) && (
+        <p style={{ fontSize: 12.5, color: "#8C2F32", margin: "0 0 10px" }}>
+          Falta completar: {[!pacienteId && "paciente", (!profesional && !editando) && "profesional", !monto && "monto"].filter(Boolean).join(", ")}.
+        </p>
+      )}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
-        <Btn variant="primary" onClick={() => monto && pacienteId && onSave({ ...(initial || {}), pacienteId, concepto, tipoServicio, modalidad, obraSocial: nombreObraSocial, monto: Number(monto), metodo, fecha, tipoPago })}>{editando ? "Guardar cambios" : "Guardar cobro"}</Btn>
+        <Btn variant="primary" onClick={() => {
+          setIntentoGuardar(true);
+          if (!monto || !pacienteId || (!profesional && !editando)) return;
+          onSave({
+            ...(initial || {}), pacienteId, profesional, concepto, tipoServicio, modalidad, obraSocial: nombreObraSocial,
+            monto: Number(monto), metodo, fecha, tipoPago,
+            cantidadSesiones: tipoPago === TIPO_SESIONES ? cantidadNum : 0,
+          });
+        }}>{editando ? "Guardar cambios" : "Guardar cobro"}</Btn>
       </div>
     </>
   );
