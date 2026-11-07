@@ -258,6 +258,8 @@ export const mapCobros = {
     fecha: c.fecha,
     tipo_pago: c.tipoPago || "Individual",
     observaciones: c.observaciones || "",
+    profesional: c.profesional || "",
+    cantidad_sesiones: Number(c.cantidadSesiones) || 0,
   }),
   fromRow: (r) => ({
     id: r.id,
@@ -271,6 +273,8 @@ export const mapCobros = {
     fecha: r.fecha,
     tipoPago: r.tipo_pago || "Individual",
     observaciones: r.observaciones || "",
+    profesional: r.profesional || "",
+    cantidadSesiones: Number(r.cantidad_sesiones) || 0,
   }),
 };
 
