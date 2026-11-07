@@ -2739,8 +2739,8 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial 
         <PatientPicker pacientes={pacientes} value={pacienteId} onChange={setPacienteId} onCreateNew={onCreatePaciente} />
       </Field>
       <Field label="Profesional que lo atiende">
-        <select value={profesional} onChange={(e) => setProfesional(e.target.value)} style={intentoGuardar && !profesional && !editando ? { borderColor: "#8C2F32" } : undefined}>
-          <option value="">{editando ? "Sin asignar" : "Elegir profesional…"}</option>
+        <select value={profesional} onChange={(e) => setProfesional(e.target.value)}>
+          <option value="">Sin asignar (opcional)</option>
           {PROFESIONALES.map((p) => <option key={p}>{p}</option>)}
         </select>
       </Field>
@@ -2836,16 +2836,16 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial 
           Con "Individual" este pago no queda en seguimiento de vencimiento mensual. Si en realidad abona por mes, cambiá esta opción a "Mensual".
         </p>
       )}
-      {intentoGuardar && (!monto || !pacienteId || (!profesional && !editando)) && (
+      {intentoGuardar && (!monto || !pacienteId) && (
         <p style={{ fontSize: 12.5, color: "#8C2F32", margin: "0 0 10px" }}>
-          Falta completar: {[!pacienteId && "paciente", (!profesional && !editando) && "profesional", !monto && "monto"].filter(Boolean).join(", ")}.
+          Falta completar: {[!pacienteId && "paciente", !monto && "monto"].filter(Boolean).join(", ")}.
         </p>
       )}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
         <Btn variant="primary" onClick={() => {
           setIntentoGuardar(true);
-          if (!monto || !pacienteId || (!profesional && !editando)) return;
+          if (!monto || !pacienteId) return;
           onSave({
             ...(initial || {}), pacienteId, profesional, concepto, tipoServicio, modalidad, obraSocial: nombreObraSocial,
             monto: Number(monto), metodo, fecha, tipoPago,
