@@ -92,6 +92,26 @@ function estadoMensualidad(paciente) {
   const tone = estado === "vencido" ? "coral" : estado === "proximo" ? "clay" : "sage";
   return { vencimiento: paciente.vencimientoMensualidad, dias, estado, label, tone };
 }
+// Vencimiento de un cobro (para la tabla de Cobros). Mensual: un mes después de la fecha de pago.
+// Si el paciente ya tiene un pago mensual más nuevo, este figura como "Renovado".
+function vencimientoCobro(c, cobros, registros) {
+  if (c.tipoPago === "Mensual") {
+    const venc = addMonths(c.fecha, 1);
+    const hayMasNuevo = (cobros || []).some((o) => o.pacienteId === c.pacienteId && o.tipoPago === "Mensual" && (o.fecha > c.fecha || (o.fecha === c.fecha && o.id > c.id)));
+    if (hayMasNuevo) return { tipo: "fecha", venc, texto: "Renovado", tone: "muted" };
+    const dias = diasEntre(todayISO(), venc);
+    if (dias < 0) return { tipo: "fecha", venc, texto: `Venció hace ${-dias} ${dias === -1 ? "día" : "días"}`, tone: "coral" };
+    if (dias === 0) return { tipo: "fecha", venc, texto: "Vence hoy", tone: "clay" };
+    return { tipo: "fecha", venc, texto: `Faltan ${dias} ${dias === 1 ? "día" : "días"}`, tone: dias <= UMBRAL_PROXIMO_A_VENCER ? "clay" : "sage" };
+  }
+  if (c.tipoPago === TIPO_SESIONES) {
+    const mios = (cobros || []).filter((o) => o.pacienteId === c.pacienteId && o.tipoPago === TIPO_SESIONES);
+    const esUltimo = !mios.some((o) => o.fecha > c.fecha || (o.fecha === c.fecha && o.id > c.id));
+    const ses = esUltimo ? estadoSesiones(c.pacienteId, cobros, registros) : null;
+    if (ses) return { tipo: "sesiones", texto: ses.restantes <= 0 ? "Sin sesiones" : `Quedan ${ses.restantes} de ${ses.compradas}`, tone: ses.tone };
+  }
+  return null;
+}
 const mondayOf = (iso) => {
   const d = new Date(iso + "T00:00:00");
   const day = d.getDay();
@@ -2125,9 +2145,10 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos, regist
               <div className="empty-state">{filtroProf === "todos" ? "No hay cobros registrados en este mes." : "No hay cobros de este profesional en este mes."}</div>
             ) : (
               <table>
-                <thead><tr><th>Fecha</th><th>Paciente</th><th>Profesional</th><th>Tipo de servicio</th><th>Obra social</th><th>Concepto</th><th>Método</th><th>Monto</th><th></th><th></th><th></th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Paciente</th><th>Profesional</th><th>Tipo de servicio</th><th>Obra social</th><th>Concepto</th><th>Método</th><th>Monto</th><th>Vencimiento</th><th></th><th></th><th></th></tr></thead>
                 <tbody>
                   {delMes.map((c) => {
+                    const vc = vencimientoCobro(c, cobros, registros);
                     const pac = pacientes.find((p) => p.id === c.pacienteId);
                     const tieneNota = !!(c.observaciones && c.observaciones.trim());
                     return (
@@ -2140,6 +2161,14 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos, regist
                         <td>{c.concepto}</td>
                         <td><Badge tone="sage">{c.metodo}</Badge></td>
                         <td style={{ fontWeight: 600 }}>{fmtMoney(c.monto)}</td>
+                        <td>
+                          {vc ? (
+                            <>
+                              {vc.venc && <div>{fmtDate(vc.venc)}</div>}
+                              {vc.tone === "muted" ? <span className="muted-text" style={{ fontSize: 12 }}>{vc.texto}</span> : <Badge tone={vc.tone}>{vc.texto}</Badge>}
+                            </>
+                          ) : <span className="muted-text">—</span>}
+                        </td>
                         <td>
                           <button
                             className="icon-btn"
