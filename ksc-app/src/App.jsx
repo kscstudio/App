@@ -2245,6 +2245,13 @@ function VencimientosView({ pacientes, setPacientes, cobros = [], registros = []
   const [filtroEstado, setFiltroEstado] = useState("todos");
   const [filtroTipo, setFiltroTipo] = useState("todos");
   const [verPausados, setVerPausados] = useState(false);
+  const [filtroProf, setFiltroProf] = useState("todos");
+
+  // Profesional del paciente: el del cobro más reciente que tenga uno; si no, el del último ingreso del registro diario.
+  const profesionalDe = (pacId) => {
+    const masReciente = (lista) => lista.filter((x) => x.pacienteId === pacId && x.profesional).sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+    return (masReciente(cobros) || masReciente(registros))?.profesional || "";
+  };
 
   const estadoDe = (dias) => (dias < 0 ? "vencido" : dias <= UMBRAL_PROXIMO_A_VENCER ? "proximo" : "al_dia");
 
@@ -2254,12 +2261,12 @@ function VencimientosView({ pacientes, setPacientes, cobros = [], registros = []
       .filter((p) => p.planPago === "Mensual" && p.vencimientoMensualidad)
       .map((p) => {
         const dias = diasEntre(todayISO(), p.vencimientoMensualidad);
-        return { key: p.id + "-m", tipo: "mensual", p, dias, estado: estadoDe(dias), orden: dias };
+        return { key: p.id + "-m", tipo: "mensual", p, prof: profesionalDe(p.id), dias, estado: estadoDe(dias), orden: dias };
       }),
     ...pacientes
       .map((p) => ({ p, s: estadoSesiones(p.id, cobros, registros) }))
       .filter((x) => x.s && x.s.vigente)
-      .map(({ p, s }) => ({ key: p.id + "-s", tipo: "sesiones", p, s, estado: s.estado, orden: s.restantes <= 0 ? -1 : s.restantes === 1 ? 1 : 100 + s.restantes })),
+      .map(({ p, s }) => ({ key: p.id + "-s", tipo: "sesiones", p, s, prof: profesionalDe(p.id), estado: s.estado, orden: s.restantes <= 0 ? -1 : s.restantes === 1 ? 1 : 100 + s.restantes })),
   ].sort((a, b) => a.orden - b.orden);
 
   const activos = filas.filter((f) => !f.p.pausadoVencimiento);
@@ -2268,7 +2275,9 @@ function VencimientosView({ pacientes, setPacientes, cobros = [], registros = []
   const filtrados = activos
     .filter((f) => f.p.nombre.toLowerCase().includes(q.toLowerCase()))
     .filter((f) => filtroEstado === "todos" || f.estado === filtroEstado)
-    .filter((f) => filtroTipo === "todos" || f.tipo === filtroTipo);
+    .filter((f) => filtroTipo === "todos" || f.tipo === filtroTipo)
+    .filter((f) => coincideProfesional({ profesional: f.prof }, filtroProf));
+  const profesionalesVenc = listaProfesionales([...cobros, ...registros]);
 
   const pausar = (id) => setPacientes(pacientes.map((p) => (p.id === id ? { ...p, pausadoVencimiento: true } : p)));
   const reactivar = (id) => setPacientes(pacientes.map((p) => (p.id === id ? { ...p, pausadoVencimiento: false } : p)));
@@ -2287,6 +2296,11 @@ function VencimientosView({ pacientes, setPacientes, cobros = [], registros = []
           <option value="mensual">Solo mensualidades</option>
           <option value="sesiones">Solo por sesiones</option>
         </select>
+        <select value={filtroProf} onChange={(e) => setFiltroProf(e.target.value)} style={selStyle}>
+          <option value="todos">Todos los profesionales</option>
+          {profesionalesVenc.map((pr) => <option key={pr} value={pr}>{pr}</option>)}
+          <option value={SIN_PROFESIONAL}>{SIN_PROFESIONAL}</option>
+        </select>
         <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} style={selStyle}>
           <option value="todos">Todos los estados</option>
           <option value="vencido">Vencidos / sin sesiones</option>
@@ -2302,11 +2316,12 @@ function VencimientosView({ pacientes, setPacientes, cobros = [], registros = []
           <div className="empty-state">No hay pacientes que coincidan con la búsqueda o el filtro elegido.</div>
         ) : (
           <table>
-            <thead><tr><th>Paciente</th><th>Tipo</th><th>Vencimiento / Sesiones</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th>Paciente</th><th>Profesional</th><th>Tipo</th><th>Vencimiento / Sesiones</th><th>Estado</th><th></th></tr></thead>
             <tbody>
               {filtrados.map((f) => (
                 <tr key={f.key}>
                   <td style={{ fontWeight: 600 }}>{f.p.nombre}</td>
+                  <td>{f.prof || <span className="muted-text">{SIN_PROFESIONAL}</span>}</td>
                   <td><Badge tone={f.tipo === "mensual" ? "clay" : "sage"}>{f.tipo === "mensual" ? "Mensualidad" : "Por sesiones"}</Badge></td>
                   <td>
                     {f.tipo === "mensual"
@@ -2344,11 +2359,12 @@ function VencimientosView({ pacientes, setPacientes, cobros = [], registros = []
           </button>
           {verPausados && (
             <table>
-              <thead><tr><th>Paciente</th><th>Tipo</th><th>Último estado</th><th></th></tr></thead>
+              <thead><tr><th>Paciente</th><th>Profesional</th><th>Tipo</th><th>Último estado</th><th></th></tr></thead>
               <tbody>
                 {pausados.map((f) => (
                   <tr key={f.key}>
                     <td style={{ fontWeight: 600 }}>{f.p.nombre}</td>
+                    <td>{f.prof || SIN_PROFESIONAL}</td>
                     <td>{f.tipo === "mensual" ? "Mensualidad" : "Por sesiones"}</td>
                     <td>{f.tipo === "mensual" ? fmtDate(f.p.vencimientoMensualidad) : `Usó ${f.s.usadas} de ${f.s.compradas}`}</td>
                     <td><Btn variant="ghost" small onClick={() => reactivar(f.p.id)}>Reactivar aviso</Btn></td>
