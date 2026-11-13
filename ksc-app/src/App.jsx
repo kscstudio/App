@@ -2154,7 +2154,13 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos, regist
                     return (
                       <tr key={c.id}>
                         <td>{fmtDate(c.fecha)}</td>
-                        <td>{pac ? pac.nombre : "—"}</td>
+                        <td>
+                          {pac ? pac.nombre : "—"}
+                          {(() => {
+                            const ant = cobros.filter((o) => o.pacienteId === c.pacienteId && o.id !== c.id && (o.fecha < c.fecha || (o.fecha === c.fecha && o.id < c.id))).sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+                            return <div className="muted-text" style={{ fontSize: 11.5 }}>{ant ? `Pago anterior: ${fmtMoney(ant.monto)} (${fmtDate(ant.fecha)})` : "Primer pago"}</div>;
+                          })()}
+                        </td>
                         <td>{c.profesional || <span className="muted-text">—</span>}</td>
                         <td>{c.tipoServicio ? <Badge tone="clay">{c.tipoServicio}</Badge> : "—"}{c.tipoPago === TIPO_SESIONES && <> <Badge tone="sage">{c.cantidadSesiones || 0} ses.</Badge></>}</td>
                         <td>{c.obraSocial ? <Badge tone="sage">{c.obraSocial}</Badge> : "Particular"}</td>
@@ -2199,12 +2205,12 @@ function CobrosView({ cobros, setCobros, pacientes, setPacientes, turnos, regist
 
       {showNew && (
         <Modal title="Registrar cobro" onClose={() => setShowNew(false)}>
-          <NuevoCobroForm pacientes={pacientes} onCreatePaciente={crearPacienteRapido} turnos={turnos} onSave={(c) => { addCobro(c); setShowNew(false); }} onClose={() => setShowNew(false)} />
+          <NuevoCobroForm cobros={cobros} pacientes={pacientes} onCreatePaciente={crearPacienteRapido} turnos={turnos} onSave={(c) => { addCobro(c); setShowNew(false); }} onClose={() => setShowNew(false)} />
         </Modal>
       )}
       {editCobro && (
         <Modal title="Editar cobro" onClose={() => setEditCobro(null)}>
-          <NuevoCobroForm initial={editCobro} pacientes={pacientes} onCreatePaciente={crearPacienteRapido} onSave={guardarEdicionCobro} onClose={() => setEditCobro(null)} />
+          <NuevoCobroForm cobros={cobros} initial={editCobro} pacientes={pacientes} onCreatePaciente={crearPacienteRapido} onSave={guardarEdicionCobro} onClose={() => setEditCobro(null)} />
         </Modal>
       )}
       {notaCobro && (
@@ -2708,7 +2714,7 @@ function ReporteMensualView({ cobros, turnos, pacientes }) {
 }
 
 
-function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial = null }) {
+function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial = null, cobros = [] }) {
   const editando = !!initial;
   const [profesional, setProfesional] = useState(initial?.profesional || "");
   const [cantidadSesiones, setCantidadSesiones] = useState(initial?.cantidadSesiones ? String(initial.cantidadSesiones) : "1");
@@ -2783,6 +2789,18 @@ function NuevoCobroForm({ pacientes, onCreatePaciente, onSave, onClose, initial 
       <Field label="Paciente">
         <PatientPicker pacientes={pacientes} value={pacienteId} onChange={setPacienteId} onCreateNew={onCreatePaciente} />
       </Field>
+      {(() => {
+        const previos = cobros.filter((c) => c.pacienteId === pacienteId && c.id !== initial?.id).sort((a, b) => b.fecha.localeCompare(a.fecha));
+        const u = previos[0];
+        if (!pacienteId) return null;
+        return (
+          <div style={{ background: "#F5EFE3", border: "1px solid #E4D9C4", borderRadius: 3, padding: "8px 12px", fontSize: 13, marginBottom: 14 }}>
+            {u
+              ? <>Último pago: <strong>{fmtMoney(u.monto)}</strong> el {fmtDate(u.fecha)} · {u.concepto || u.tipoPago}{u.metodo ? ` · ${u.metodo}` : ""}</>
+              : "Este paciente todavía no tiene pagos cargados."}
+          </div>
+        );
+      })()}
       <Field label="Profesional que lo atiende">
         <select value={profesional} onChange={(e) => setProfesional(e.target.value)}>
           <option value="">Sin asignar (opcional)</option>
